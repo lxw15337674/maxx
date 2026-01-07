@@ -1,0 +1,7 @@
+version: '3'
+
+tasks:
+  dev:
+    desc: Run development server
+    cmds:
+      - go run cmd/maxx/main.go
