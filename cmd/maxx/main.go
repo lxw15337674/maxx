@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 
 	"github.com/Bowl42/maxx-next/internal/adapter/client"
 	_ "github.com/Bowl42/maxx-next/internal/adapter/provider/antigravity" // Register antigravity adapter
@@ -16,11 +17,30 @@ import (
 	"github.com/Bowl42/maxx-next/internal/router"
 )
 
+// getDefaultDBPath returns the default database path (~/.config/maxx/maxx.db)
+func getDefaultDBPath() string {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		// Fallback to current directory if home dir is unavailable
+		return "maxx.db"
+	}
+	return filepath.Join(homeDir, ".config", "maxx", "maxx.db")
+}
+
 func main() {
+	// Get default database path
+	defaultDBPath := getDefaultDBPath()
+
 	// Parse flags
-	addr := flag.String("addr", ":8080", "Server address")
-	dbPath := flag.String("db", "maxx.db", "SQLite database path")
+	addr := flag.String("addr", ":9880", "Server address")
+	dbPath := flag.String("db", defaultDBPath, "SQLite database path")
 	flag.Parse()
+
+	// Ensure database directory exists
+	dbDir := filepath.Dir(*dbPath)
+	if err := os.MkdirAll(dbDir, 0755); err != nil {
+		log.Fatalf("Failed to create database directory %s: %v", dbDir, err)
+	}
 
 	// Initialize database
 	db, err := sqlite.NewDB(*dbPath)
@@ -37,6 +57,7 @@ func main() {
 	routingStrategyRepo := sqlite.NewRoutingStrategyRepository(db)
 	proxyRequestRepo := sqlite.NewProxyRequestRepository(db)
 	attemptRepo := sqlite.NewProxyUpstreamAttemptRepository(db)
+	settingRepo := sqlite.NewSystemSettingRepository(db)
 
 	// Create cached repositories
 	cachedProviderRepo := cached.NewProviderRepository(providerRepo)
@@ -81,6 +102,8 @@ func main() {
 		cachedRetryConfigRepo,
 		cachedRoutingStrategyRepo,
 		proxyRequestRepo,
+		settingRepo,
+		*addr,
 	)
 
 	// Setup routes
@@ -96,6 +119,8 @@ func main() {
 	mux.Handle("/v1/chat/completions", proxyHandler)
 	// Codex API
 	mux.Handle("/v1/responses", proxyHandler)
+	// Gemini API (Google AI Studio style)
+	mux.Handle("/v1beta/models/", proxyHandler)
 
 	// Health check
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -112,12 +137,14 @@ func main() {
 
 	// Start server
 	log.Printf("Starting maxx-next server on %s", *addr)
+	log.Printf("Database: %s", *dbPath)
 	log.Printf("Admin API: http://localhost%s/admin/", *addr)
 	log.Printf("WebSocket: ws://localhost%s/ws", *addr)
 	log.Printf("Proxy endpoints:")
 	log.Printf("  Claude: http://localhost%s/v1/messages", *addr)
 	log.Printf("  OpenAI: http://localhost%s/v1/chat/completions", *addr)
 	log.Printf("  Codex:  http://localhost%s/v1/responses", *addr)
+	log.Printf("  Gemini: http://localhost%s/v1beta/models/{model}:generateContent", *addr)
 
 	if err := http.ListenAndServe(*addr, mux); err != nil {
 		log.Printf("Server error: %v", err)

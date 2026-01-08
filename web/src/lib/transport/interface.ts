@@ -1,0 +1,101 @@
+/**
+ * Transport 抽象接口
+ * 统一 HTTP/WebSocket 和 Wails 两种通信方式
+ */
+
+import type {
+  Provider,
+  CreateProviderData,
+  Project,
+  CreateProjectData,
+  Session,
+  Route,
+  CreateRouteData,
+  RetryConfig,
+  CreateRetryConfigData,
+  RoutingStrategy,
+  CreateRoutingStrategyData,
+  ProxyRequest,
+  PaginationParams,
+  ProxyStatus,
+  WSMessageType,
+  EventCallback,
+  UnsubscribeFn,
+} from './types';
+
+/**
+ * Transport 抽象接口
+ */
+export interface Transport {
+  // ===== Provider API =====
+  getProviders(): Promise<Provider[]>;
+  getProvider(id: number): Promise<Provider>;
+  createProvider(data: CreateProviderData): Promise<Provider>;
+  updateProvider(id: number, data: Partial<Provider>): Promise<Provider>;
+  deleteProvider(id: number): Promise<void>;
+
+  // ===== Project API =====
+  getProjects(): Promise<Project[]>;
+  getProject(id: number): Promise<Project>;
+  createProject(data: CreateProjectData): Promise<Project>;
+  updateProject(id: number, data: Partial<Project>): Promise<Project>;
+  deleteProject(id: number): Promise<void>;
+
+  // ===== Route API =====
+  getRoutes(): Promise<Route[]>;
+  getRoute(id: number): Promise<Route>;
+  createRoute(data: CreateRouteData): Promise<Route>;
+  updateRoute(id: number, data: Partial<Route>): Promise<Route>;
+  deleteRoute(id: number): Promise<void>;
+
+  // ===== Session API (只读) =====
+  getSessions(): Promise<Session[]>;
+
+  // ===== RetryConfig API =====
+  getRetryConfigs(): Promise<RetryConfig[]>;
+  getRetryConfig(id: number): Promise<RetryConfig>;
+  createRetryConfig(data: CreateRetryConfigData): Promise<RetryConfig>;
+  updateRetryConfig(id: number, data: Partial<RetryConfig>): Promise<RetryConfig>;
+  deleteRetryConfig(id: number): Promise<void>;
+
+  // ===== RoutingStrategy API =====
+  getRoutingStrategies(): Promise<RoutingStrategy[]>;
+  getRoutingStrategy(id: number): Promise<RoutingStrategy>;
+  createRoutingStrategy(data: CreateRoutingStrategyData): Promise<RoutingStrategy>;
+  updateRoutingStrategy(id: number, data: Partial<RoutingStrategy>): Promise<RoutingStrategy>;
+  deleteRoutingStrategy(id: number): Promise<void>;
+
+  // ===== ProxyRequest API (只读) =====
+  getProxyRequests(params?: PaginationParams): Promise<ProxyRequest[]>;
+  getProxyRequest(id: number): Promise<ProxyRequest>;
+
+  // ===== Proxy Status API =====
+  getProxyStatus(): Promise<ProxyStatus>;
+
+  // ===== 实时订阅 =====
+  subscribe<T = unknown>(eventType: WSMessageType, callback: EventCallback<T>): UnsubscribeFn;
+
+  // ===== 生命周期 =====
+  connect(): Promise<void>;
+  disconnect(): void;
+  isConnected(): boolean;
+}
+
+/**
+ * Transport 运行时类型
+ */
+export type TransportType = 'http' | 'wails';
+
+/**
+ * Transport 配置
+ */
+export interface TransportConfig {
+  /** HTTP 模式的 base URL */
+  baseURL?: string;
+  /** WebSocket URL (HTTP 模式) */
+  wsURL?: string;
+  /** 重连间隔 (ms) */
+  reconnectInterval?: number;
+  /** 最大重连次数 */
+  maxReconnectAttempts?: number;
+}

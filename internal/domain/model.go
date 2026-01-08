@@ -14,199 +14,203 @@ var (
 
 type ProviderConfigCustom struct {
 	// 中转站的 URL
-	BaseURL string
+	BaseURL string `json:"baseURL"`
 
 	// API Key
-	APIKey string
+	APIKey string `json:"apiKey"`
 
 	// 某个 Client 有特殊的 BaseURL
-	ClientBaseURL map[ClientType]string
+	ClientBaseURL map[ClientType]string `json:"clientBaseURL,omitempty"`
 
 	// Model 映射: RequestModel → MappedModel
-	ModelMapping map[string]string
+	ModelMapping map[string]string `json:"modelMapping,omitempty"`
 }
 
 type ProviderConfigAntigravity struct {
 	// 邮箱（用于标识帐号）
-	Email string
+	Email string `json:"email"`
 
 	// Google OAuth refresh_token
-	RefreshToken string
+	RefreshToken string `json:"refreshToken"`
 
 	// Google Cloud Project ID
-	ProjectID string
+	ProjectID string `json:"projectID"`
 
 	// v1internal 端点
-	Endpoint string
+	Endpoint string `json:"endpoint"`
 
 	// Model 映射: RequestModel → MappedModel
-	ModelMapping map[string]string
+	ModelMapping map[string]string `json:"modelMapping,omitempty"`
 }
 
 type ProviderConfig struct {
-	Custom      *ProviderConfigCustom
-	Antigravity *ProviderConfigAntigravity
+	Custom      *ProviderConfigCustom      `json:"custom,omitempty"`
+	Antigravity *ProviderConfigAntigravity `json:"antigravity,omitempty"`
 }
 
 // Provider 供应商
 type Provider struct {
-	ID        uint64
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	ID        uint64    `json:"id"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
 
 	// 1. Custom ，主要用来各种中转站
 	// 2. Antigravity
-	Type string
+	Type string `json:"type"`
 
 	// 展示的名称
-	Name string
+	Name string `json:"name"`
 
 	// 配置
-	Config *ProviderConfig
+	Config *ProviderConfig `json:"config"`
 
 	// 支持的 Client
-	SupportedClientTypes []ClientType
+	SupportedClientTypes []ClientType `json:"supportedClientTypes"`
 }
 
 type Project struct {
-	ID        uint64
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	ID        uint64    `json:"id"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
 
-	Name string
+	Name string `json:"name"`
 }
 
 type Session struct {
-	ID        uint64
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	ID        uint64    `json:"id"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
 
-	SessionID  string
-	ClientType ClientType
+	SessionID  string     `json:"sessionID"`
+	ClientType ClientType `json:"clientType"`
 
 	// 0 表示没有项目
-	ProjectID uint64
+	ProjectID uint64 `json:"projectID"`
 }
 
 // 路由
 type Route struct {
-	ID        uint64
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	ID        uint64    `json:"id"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
 
-	IsEnabled bool
+	IsEnabled bool `json:"isEnabled"`
+
+	// 是否为原生支持的路由（自动创建，跟随 Provider 设置）
+	// false 表示通过 API 转换支持（手动创建，独立管理）
+	IsNative bool `json:"isNative"`
 
 	// 0 表示没有项目即全局
-	ProjectID  uint64
-	ClientType ClientType
-	ProviderID uint64
+	ProjectID  uint64     `json:"projectID"`
+	ClientType ClientType `json:"clientType"`
+	ProviderID uint64     `json:"providerID"`
 
 	// 位置，数字越小越优先
-	Position int
+	Position int `json:"position"`
 
 	// 重试配置，0 表示使用系统默认
-	RetryConfigID uint64
+	RetryConfigID uint64 `json:"retryConfigID"`
 
 	// Model 映射: RequestModel → MappedModel，优先级高于 Provider
-	ModelMapping map[string]string
+	ModelMapping map[string]string `json:"modelMapping,omitempty"`
 }
 
 type RequestInfo struct {
-	Method  string
-	Headers map[string]string
-	URL     string
-	Body    string
+	Method  string            `json:"method"`
+	Headers map[string]string `json:"headers"`
+	URL     string            `json:"url"`
+	Body    string            `json:"body"`
 }
 type ResponseInfo struct {
-	Status  int
-	Headers map[string]string
-	Body    string
+	Status  int               `json:"status"`
+	Headers map[string]string `json:"headers"`
+	Body    string            `json:"body"`
 }
 
 // 追踪
 type ProxyRequest struct {
-	ID        uint64
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	ID        uint64    `json:"id"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
 
-	RequestID  string
-	SessionID  string
-	ClientType ClientType
+	RequestID  string     `json:"requestID"`
+	SessionID  string     `json:"sessionID"`
+	ClientType ClientType `json:"clientType"`
 
-	RequestModel  string
-	ResponseModel string
+	RequestModel  string `json:"requestModel"`
+	ResponseModel string `json:"responseModel"`
 
-	StartTime time.Time
-	EndTime   time.Time
-	Duration  time.Duration
+	StartTime time.Time     `json:"startTime"`
+	EndTime   time.Time     `json:"endTime"`
+	Duration  time.Duration `json:"duration"`
 
 	// PENDING, IN_PROGRESS, COMPLETED, FAILED
-	Status string
+	Status string `json:"status"`
 
 	// 原始请求的信息
-	RequestInfo  *RequestInfo
-	ResponseInfo *ResponseInfo
+	RequestInfo  *RequestInfo  `json:"requestInfo"`
+	ResponseInfo *ResponseInfo `json:"responseInfo"`
 
 	// 错误信息
-	Error                       string
-	ProxyUpstreamAttemptCount   uint64
-	FinalProxyUpstreamAttemptID uint64
+	Error                       string `json:"error"`
+	ProxyUpstreamAttemptCount   uint64 `json:"proxyUpstreamAttemptCount"`
+	FinalProxyUpstreamAttemptID uint64 `json:"finalProxyUpstreamAttemptID"`
 
 	// Token 使用情况
-	InputTokenCount  uint64
-	OutputTokenCount uint64
-	CacheReadCount   uint64
-	CacheWriteCount  uint64
-	Cost             uint64
+	InputTokenCount  uint64 `json:"inputTokenCount"`
+	OutputTokenCount uint64 `json:"outputTokenCount"`
+	CacheReadCount   uint64 `json:"cacheReadCount"`
+	CacheWriteCount  uint64 `json:"cacheWriteCount"`
+	Cost             uint64 `json:"cost"`
 }
 
 type ProxyUpstreamAttempt struct {
-	ID        uint64
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	ID        uint64    `json:"id"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
 
 	// PENDING, IN_PROGRESS, COMPLETED, FAILED
-	Status string
+	Status string `json:"status"`
 
-	ProxyRequestID uint64
+	ProxyRequestID uint64 `json:"proxyRequestID"`
 
-	RequestInfo  *RequestInfo
-	ResponseInfo *ResponseInfo
+	RequestInfo  *RequestInfo  `json:"requestInfo"`
+	ResponseInfo *ResponseInfo `json:"responseInfo"`
 
-	RouteID    uint64
-	ProviderID uint64
+	RouteID    uint64 `json:"routeID"`
+	ProviderID uint64 `json:"providerID"`
 
 	// Token 使用情况
-	InputTokenCount  uint64
-	OutputTokenCount uint64
-	CacheReadCount   uint64
-	CacheWriteCount  uint64
-	Cost             uint64
+	InputTokenCount  uint64 `json:"inputTokenCount"`
+	OutputTokenCount uint64 `json:"outputTokenCount"`
+	CacheReadCount   uint64 `json:"cacheReadCount"`
+	CacheWriteCount  uint64 `json:"cacheWriteCount"`
+	Cost             uint64 `json:"cost"`
 }
 
 // 重试配置
 type RetryConfig struct {
-	ID        uint64
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	ID        uint64    `json:"id"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
 
 	// 配置名称，便于复用
-	Name string
+	Name string `json:"name"`
 
 	// 是否为系统默认配置
-	IsDefault bool
+	IsDefault bool `json:"isDefault"`
 
 	// 最大重试次数
-	MaxRetries int
+	MaxRetries int `json:"maxRetries"`
 
 	// 初始重试间隔
-	InitialInterval time.Duration
+	InitialInterval time.Duration `json:"initialInterval"`
 
 	// 退避倍率，1.0 表示固定间隔
-	BackoffRate float64
+	BackoffRate float64 `json:"backoffRate"`
 
 	// 最大间隔上限
-	MaxInterval time.Duration
+	MaxInterval time.Duration `json:"maxInterval"`
 }
 
 // 路由策略类型
@@ -227,16 +231,29 @@ type RoutingStrategyConfig struct {
 
 // 路由策略
 type RoutingStrategy struct {
-	ID        uint64
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	ID        uint64    `json:"id"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
 
 	// 0 表示全局策略
-	ProjectID uint64
+	ProjectID uint64 `json:"projectID"`
 
 	// 策略类型
-	Type RoutingStrategyType
+	Type RoutingStrategyType `json:"type"`
 
 	// 策略特定配置
-	Config *RoutingStrategyConfig
+	Config *RoutingStrategyConfig `json:"config"`
 }
+
+// 系统设置（键值对字典表）
+type SystemSetting struct {
+	Key       string    `json:"key"`
+	Value     string    `json:"value"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
+// 系统设置 Key 常量
+const (
+	SettingKeyProxyPort = "proxy_port" // 代理服务器端口，默认 9880
+)

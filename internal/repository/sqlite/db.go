@@ -67,6 +67,7 @@ func (d *DB) migrate() error {
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		is_enabled INTEGER DEFAULT 1,
+		is_native INTEGER DEFAULT 1,
 		project_id INTEGER DEFAULT 0,
 		client_type TEXT NOT NULL,
 		provider_id INTEGER NOT NULL,
@@ -136,6 +137,13 @@ func (d *DB) migrate() error {
 		cache_read_count INTEGER DEFAULT 0,
 		cache_write_count INTEGER DEFAULT 0,
 		cost INTEGER DEFAULT 0
+	);
+
+	CREATE TABLE IF NOT EXISTS system_settings (
+		key TEXT PRIMARY KEY,
+		value TEXT NOT NULL,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	);
 
 	CREATE INDEX IF NOT EXISTS idx_sessions_session_id ON sessions(session_id);

@@ -1,0 +1,228 @@
+import { useState } from 'react';
+import { Globe, ChevronLeft, Key, Check } from 'lucide-react';
+import { useCreateProvider } from '@/hooks/queries';
+import type { ClientType, CreateProviderData } from '@/lib/transport';
+import { quickTemplates, defaultClients, type ClientConfig, type ProviderFormData, type CreateStep } from '../types';
+import { ClientsConfigSection } from './clients-config-section';
+import { SelectTypeStep } from './select-type-step';
+import { AntigravityComingSoon } from './antigravity-coming-soon';
+
+interface ProviderCreateFlowProps {
+  onClose: () => void;
+}
+
+export function ProviderCreateFlow({ onClose }: ProviderCreateFlowProps) {
+  const [step, setStep] = useState<CreateStep>('select-type');
+  const [saving, setSaving] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'success' | 'error'>('idle');
+  const createProvider = useCreateProvider();
+
+  const [formData, setFormData] = useState<ProviderFormData>({
+    type: 'custom',
+    name: '',
+    selectedTemplate: null,
+    baseURL: '',
+    apiKey: '',
+    clients: [...defaultClients],
+  });
+
+  const selectType = (type: 'custom' | 'antigravity') => {
+    setFormData((prev) => ({ ...prev, type }));
+    if (type === 'antigravity') {
+      setStep('antigravity-coming-soon');
+    }
+  };
+
+  const applyTemplate = (templateId: string) => {
+    const template = quickTemplates.find((t) => t.id === templateId);
+    if (template) {
+      const updatedClients = defaultClients.map((client) => {
+        const isSupported = template.supportedClients.includes(client.id);
+        const baseURL = template.clientBaseURLs[client.id] || '';
+        return { ...client, enabled: isSupported, urlOverride: baseURL };
+      });
+
+      setFormData((prev) => ({
+        ...prev,
+        selectedTemplate: templateId,
+        name: template.name,
+        clients: updatedClients,
+      }));
+
+      setStep('custom-config');
+    }
+  };
+
+  const updateClient = (clientId: ClientType, updates: Partial<ClientConfig>) => {
+    setFormData((prev) => ({
+      ...prev,
+      clients: prev.clients.map((c) => (c.id === clientId ? { ...c, ...updates } : c)),
+    }));
+  };
+
+  const isValid = () => {
+    if (!formData.name.trim()) return false;
+    if (!formData.apiKey.trim()) return false;
+    const hasEnabledClient = formData.clients.some((c) => c.enabled);
+    const hasUrl = formData.baseURL.trim() || formData.clients.some((c) => c.enabled && c.urlOverride.trim());
+    return hasEnabledClient && hasUrl;
+  };
+
+  const handleSave = async () => {
+    if (!isValid()) return;
+
+    setSaving(true);
+    setSaveStatus('idle');
+
+    try {
+      const supportedClientTypes = formData.clients.filter((c) => c.enabled).map((c) => c.id);
+      const clientBaseURL: Partial<Record<ClientType, string>> = {};
+      formData.clients.forEach((c) => {
+        if (c.enabled && c.urlOverride) {
+          clientBaseURL[c.id] = c.urlOverride;
+        }
+      });
+
+      const data: CreateProviderData = {
+        type: 'custom',
+        name: formData.name,
+        config: {
+          custom: {
+            baseURL: formData.baseURL,
+            apiKey: formData.apiKey,
+            clientBaseURL: Object.keys(clientBaseURL).length > 0 ? clientBaseURL : undefined,
+          },
+        },
+        supportedClientTypes,
+      };
+
+      await createProvider.mutateAsync(data);
+      setSaveStatus('success');
+      setTimeout(() => onClose(), 500);
+    } catch (error) {
+      console.error('Failed to create provider:', error);
+      setSaveStatus('error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleBack = () => {
+    if (step === 'custom-config' || step === 'antigravity-coming-soon') {
+      setStep('select-type');
+    } else {
+      onClose();
+    }
+  };
+
+  if (step === 'select-type') {
+    return (
+      <SelectTypeStep
+        formData={formData}
+        onSelectType={selectType}
+        onApplyTemplate={applyTemplate}
+        onSkipToConfig={() => setStep('custom-config')}
+        onBack={handleBack}
+      />
+    );
+  }
+
+  if (step === 'antigravity-coming-soon') {
+    return <AntigravityComingSoon onBack={handleBack} />;
+  }
+
+  // Custom: Configuration
+  return (
+    <div className="flex flex-col h-full">
+      <div className="h-[73px] flex items-center justify-between p-lg border-b border-border bg-surface-primary">
+        <div className="flex items-center gap-md">
+          <button
+            onClick={handleBack}
+            className="p-1.5 -ml-1 rounded-lg hover:bg-surface-hover text-text-secondary hover:text-text-primary transition-colors"
+          >
+            <ChevronLeft size={20} />
+          </button>
+          <div>
+            <h2 className="text-headline font-semibold text-text-primary">Configure Provider</h2>
+            <p className="text-caption text-text-secondary">Set up your custom provider connection</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-sm">
+          <button onClick={onClose} className="btn bg-surface-secondary hover:bg-surface-hover text-text-primary">
+            Cancel
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={saving || !isValid()}
+            className={`btn flex items-center gap-2 ${saving || !isValid() ? 'bg-surface-hover text-text-muted cursor-not-allowed' : 'btn-primary'}`}
+          >
+            {saving ? (
+              'Saving...'
+            ) : saveStatus === 'success' ? (
+              <>
+                <Check size={14} /> Saved
+              </>
+            ) : (
+              'Create Provider'
+            )}
+          </button>
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-y-auto p-lg">
+        <div className="max-w-2xl mx-auto space-y-6">
+          <div>
+            <label className="text-sm font-medium text-text-primary block mb-2">Display Name</label>
+            <input
+              type="text"
+              value={formData.name}
+              onChange={(e) => setFormData((prev) => ({ ...prev, name: e.target.value }))}
+              placeholder="My Provider"
+              className="form-input w-full"
+            />
+          </div>
+
+          <div>
+            <label className="text-sm font-medium text-text-primary block mb-2">
+              <div className="flex items-center gap-2">
+                <Globe size={14} />
+                <span>API Endpoint (Optional if client-specific URLs are set)</span>
+              </div>
+            </label>
+            <input
+              type="text"
+              value={formData.baseURL}
+              onChange={(e) => setFormData((prev) => ({ ...prev, baseURL: e.target.value }))}
+              placeholder="https://api.example.com/v1"
+              className="form-input w-full"
+            />
+          </div>
+
+          <div>
+            <label className="text-sm font-medium text-text-primary block mb-2">
+              <div className="flex items-center gap-2">
+                <Key size={14} />
+                <span>API Key</span>
+              </div>
+            </label>
+            <input
+              type="password"
+              value={formData.apiKey}
+              onChange={(e) => setFormData((prev) => ({ ...prev, apiKey: e.target.value }))}
+              placeholder="sk-..."
+              className="form-input w-full"
+            />
+          </div>
+
+          <ClientsConfigSection clients={formData.clients} onUpdateClient={updateClient} />
+
+          {saveStatus === 'error' && (
+            <div className="p-3 bg-error/10 border border-error/30 rounded-lg text-sm text-error">
+              Failed to create provider. Please try again.
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}

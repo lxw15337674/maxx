@@ -62,3 +62,10 @@ type ProxyUpstreamAttemptRepository interface {
 	Update(attempt *domain.ProxyUpstreamAttempt) error
 	ListByProxyRequestID(proxyRequestID uint64) ([]*domain.ProxyUpstreamAttempt, error)
 }
+
+type SystemSettingRepository interface {
+	Get(key string) (string, error)
+	Set(key, value string) error
+	GetAll() ([]*domain.SystemSetting, error)
+	Delete(key string) error
+}

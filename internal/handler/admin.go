@@ -19,6 +19,8 @@ type AdminHandler struct {
 	retryConfigRepo     repository.RetryConfigRepository
 	routingStrategyRepo repository.RoutingStrategyRepository
 	proxyRequestRepo    repository.ProxyRequestRepository
+	settingRepo         repository.SystemSettingRepository
+	serverAddr          string // Server address for proxy status
 }
 
 // NewAdminHandler creates a new admin handler
@@ -30,6 +32,8 @@ func NewAdminHandler(
 	retryConfigRepo repository.RetryConfigRepository,
 	routingStrategyRepo repository.RoutingStrategyRepository,
 	proxyRequestRepo repository.ProxyRequestRepository,
+	settingRepo repository.SystemSettingRepository,
+	serverAddr string,
 ) *AdminHandler {
 	return &AdminHandler{
 		providerRepo:        providerRepo,
@@ -39,6 +43,8 @@ func NewAdminHandler(
 		retryConfigRepo:     retryConfigRepo,
 		routingStrategyRepo: routingStrategyRepo,
 		proxyRequestRepo:    proxyRequestRepo,
+		settingRepo:         settingRepo,
+		serverAddr:          serverAddr,
 	}
 }
 
@@ -74,6 +80,10 @@ func (h *AdminHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.handleRoutingStrategies(w, r, id)
 	case "requests":
 		h.handleProxyRequests(w, r, id)
+	case "settings":
+		h.handleSettings(w, r, parts)
+	case "proxy-status":
+		h.handleProxyStatus(w, r)
 	default:
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 	}
@@ -108,12 +118,22 @@ func (h *AdminHandler) handleProviders(w http.ResponseWriter, r *http.Request, i
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
+		// Auto-create routes for each supported client type
+		h.syncProviderRoutes(&provider, nil)
 		writeJSON(w, http.StatusCreated, provider)
 	case http.MethodPut:
 		if id == 0 {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "id required"})
 			return
 		}
+		// Get old provider to compare supportedClientTypes
+		// Make a copy of old SupportedClientTypes before update to avoid cache mutation issues
+		var oldSupportedClientTypes []domain.ClientType
+		if oldProvider, err := h.providerRepo.GetByID(id); err == nil && oldProvider != nil {
+			oldSupportedClientTypes = make([]domain.ClientType, len(oldProvider.SupportedClientTypes))
+			copy(oldSupportedClientTypes, oldProvider.SupportedClientTypes)
+		}
+
 		var provider domain.Provider
 		if err := json.NewDecoder(r.Body).Decode(&provider); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -124,11 +144,20 @@ func (h *AdminHandler) handleProviders(w http.ResponseWriter, r *http.Request, i
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
+		// Sync routes based on supportedClientTypes changes
+		h.syncProviderRoutesWithOldTypes(&provider, oldSupportedClientTypes)
 		writeJSON(w, http.StatusOK, provider)
 	case http.MethodDelete:
 		if id == 0 {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "id required"})
 			return
+		}
+		// Delete related routes first
+		routes, _ := h.routeRepo.List()
+		for _, route := range routes {
+			if route.ProviderID == id {
+				h.routeRepo.Delete(route.ID)
+			}
 		}
 		if err := h.providerRepo.Delete(id); err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
@@ -429,6 +458,168 @@ func (h *AdminHandler) handleProxyRequests(w http.ResponseWriter, r *http.Reques
 		}
 	default:
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+	}
+}
+
+// Settings handlers
+func (h *AdminHandler) handleSettings(w http.ResponseWriter, r *http.Request, parts []string) {
+	// Extract key from path: /admin/settings/key
+	var key string
+	if len(parts) > 2 {
+		key = parts[2]
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		if key != "" {
+			// Get single setting
+			value, err := h.settingRepo.Get(key)
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]string{"key": key, "value": value})
+		} else {
+			// Get all settings
+			settings, err := h.settingRepo.GetAll()
+			if err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+				return
+			}
+			writeJSON(w, http.StatusOK, settings)
+		}
+	case http.MethodPut, http.MethodPost:
+		if key == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "key required"})
+			return
+		}
+		var body struct {
+			Value string `json:"value"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		if err := h.settingRepo.Set(key, body.Value); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"key": key, "value": body.Value})
+	case http.MethodDelete:
+		if key == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "key required"})
+			return
+		}
+		if err := h.settingRepo.Delete(key); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusNoContent, nil)
+	default:
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+	}
+}
+
+// Proxy status handler
+func (h *AdminHandler) handleProxyStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+
+	// Parse port from serverAddr (e.g., ":9880" or "0.0.0.0:9880")
+	addr := h.serverAddr
+	port := 9880 // default
+	if idx := strings.LastIndex(addr, ":"); idx >= 0 {
+		if p, err := strconv.Atoi(addr[idx+1:]); err == nil {
+			port = p
+		}
+	}
+
+	// Build display address
+	displayAddr := "localhost"
+	if port != 80 {
+		displayAddr = "localhost:" + strconv.Itoa(port)
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"running": true,
+		"address": displayAddr,
+		"port":    port,
+	})
+}
+
+// syncProviderRoutes syncs routes based on provider's supportedClientTypes
+// - Creates routes for newly added client types (position at end, enabled by default)
+// - Deletes routes for removed client types
+func (h *AdminHandler) syncProviderRoutes(provider *domain.Provider, oldProvider *domain.Provider) {
+	var oldClientTypes []domain.ClientType
+	if oldProvider != nil {
+		oldClientTypes = oldProvider.SupportedClientTypes
+	}
+	h.syncProviderRoutesWithOldTypes(provider, oldClientTypes)
+}
+
+// syncProviderRoutesWithOldTypes syncs native routes using explicit old client types slice
+// - Only manages native routes (IsNative = true), converted routes are not affected
+// - Creates native routes for newly added client types
+// - Deletes native routes for removed client types
+func (h *AdminHandler) syncProviderRoutesWithOldTypes(provider *domain.Provider, oldClientTypes []domain.ClientType) {
+	// Get all existing routes for this provider
+	allRoutes, _ := h.routeRepo.List()
+
+	// Build set of old client types
+	oldClientTypesSet := make(map[domain.ClientType]bool)
+	for _, ct := range oldClientTypes {
+		oldClientTypesSet[ct] = true
+	}
+
+	// Build set of new client types
+	newClientTypes := make(map[domain.ClientType]bool)
+	for _, ct := range provider.SupportedClientTypes {
+		newClientTypes[ct] = true
+	}
+
+	// Find NATIVE routes for this provider (only manage native routes)
+	providerNativeRoutes := make(map[domain.ClientType]*domain.Route)
+	for _, route := range allRoutes {
+		if route.ProviderID == provider.ID && route.IsNative {
+			providerNativeRoutes[route.ClientType] = route
+		}
+	}
+
+	// Delete native routes for removed client types
+	for ct := range oldClientTypesSet {
+		if !newClientTypes[ct] {
+			if route, exists := providerNativeRoutes[ct]; exists {
+				h.routeRepo.Delete(route.ID)
+			}
+		}
+	}
+
+	// Create native routes for added client types
+	for ct := range newClientTypes {
+		if !oldClientTypesSet[ct] {
+			// Calculate max position for this client type
+			maxPosition := 0
+			for _, route := range allRoutes {
+				if route.ClientType == ct && route.Position > maxPosition {
+					maxPosition = route.Position
+				}
+			}
+
+			// Create new native route at the end, enabled by default
+			newRoute := &domain.Route{
+				IsEnabled:     true,
+				IsNative:      true, // 原生支持
+				ProjectID:     0,    // Global
+				ClientType:    ct,
+				ProviderID:    provider.ID,
+				Position:      maxPosition + 1,
+				RetryConfigID: 0, // Use default
+			}
+			h.routeRepo.Create(newRoute)
+		}
 	}
 }
 

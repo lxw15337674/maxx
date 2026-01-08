@@ -5,3 +5,21 @@
 
 # Binary
 maxx
+
+# Claude Code local settings
+.claude/settings.local.json
+
+# Node.js
+node_modules/
+web/node_modules/
+web/dist/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db

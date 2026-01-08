@@ -2,30 +2,44 @@ version: '3'
 
 tasks:
   dev:
+    desc: Run full-stack development (backend + frontend)
+    deps: [dev:backend, dev:frontend]
+
+  dev:backend:
     desc: Run backend development server
     cmds:
       - go run cmd/maxx/main.go
 
-  web-dev:
+  dev:frontend:
     desc: Run frontend development server
     dir: web
     cmds:
       - npm run dev
 
-  web-install:
+  install:
+    desc: Install all dependencies
+    cmds:
+      - task: install:frontend
+
+  install:frontend:
     desc: Install frontend dependencies
     dir: web
     cmds:
       - npm install
 
-  web-build:
+  build:
+    desc: Build complete application (frontend + backend)
+    cmds:
+      - task: build:frontend
+      - task: build:backend
+
+  build:frontend:
     desc: Build frontend
     dir: web
     cmds:
       - npm run build
 
-  build:
-    desc: Build complete application (frontend + backend)
-    deps: [web-build]
+  build:backend:
+    desc: Build backend
     cmds:
       - go build -o maxx cmd/maxx/main.go

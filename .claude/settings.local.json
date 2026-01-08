@@ -12,7 +12,9 @@
       "Bash(go mod tidy:*)",
       "Bash(timeout 3:*)",
       "Bash(cat:*)",
-      "Bash(git mv:*)"
+      "Bash(git mv:*)",
+      "Bash(npm run build:*)",
+      "Bash(wc:*)"
     ]
   }
 }

@@ -24,10 +24,14 @@ func (r *RouteRepository) Create(route *domain.Route) error {
 	if route.IsEnabled {
 		isEnabled = 1
 	}
+	isNative := 0
+	if route.IsNative {
+		isNative = 1
+	}
 
 	result, err := r.db.db.Exec(
-		`INSERT INTO routes (created_at, updated_at, is_enabled, project_id, client_type, provider_id, position, retry_config_id, model_mapping) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		route.CreatedAt, route.UpdatedAt, isEnabled, route.ProjectID, route.ClientType, route.ProviderID, route.Position, route.RetryConfigID, toJSON(route.ModelMapping),
+		`INSERT INTO routes (created_at, updated_at, is_enabled, is_native, project_id, client_type, provider_id, position, retry_config_id, model_mapping) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		route.CreatedAt, route.UpdatedAt, isEnabled, isNative, route.ProjectID, route.ClientType, route.ProviderID, route.Position, route.RetryConfigID, toJSON(route.ModelMapping),
 	)
 	if err != nil {
 		return err
@@ -47,9 +51,13 @@ func (r *RouteRepository) Update(route *domain.Route) error {
 	if route.IsEnabled {
 		isEnabled = 1
 	}
+	isNative := 0
+	if route.IsNative {
+		isNative = 1
+	}
 	_, err := r.db.db.Exec(
-		`UPDATE routes SET updated_at = ?, is_enabled = ?, project_id = ?, client_type = ?, provider_id = ?, position = ?, retry_config_id = ?, model_mapping = ? WHERE id = ?`,
-		route.UpdatedAt, isEnabled, route.ProjectID, route.ClientType, route.ProviderID, route.Position, route.RetryConfigID, toJSON(route.ModelMapping), route.ID,
+		`UPDATE routes SET updated_at = ?, is_enabled = ?, is_native = ?, project_id = ?, client_type = ?, provider_id = ?, position = ?, retry_config_id = ?, model_mapping = ? WHERE id = ?`,
+		route.UpdatedAt, isEnabled, isNative, route.ProjectID, route.ClientType, route.ProviderID, route.Position, route.RetryConfigID, toJSON(route.ModelMapping), route.ID,
 	)
 	return err
 }
@@ -60,12 +68,12 @@ func (r *RouteRepository) Delete(id uint64) error {
 }
 
 func (r *RouteRepository) GetByID(id uint64) (*domain.Route, error) {
-	row := r.db.db.QueryRow(`SELECT id, created_at, updated_at, is_enabled, project_id, client_type, provider_id, position, retry_config_id, model_mapping FROM routes WHERE id = ?`, id)
+	row := r.db.db.QueryRow(`SELECT id, created_at, updated_at, is_enabled, is_native, project_id, client_type, provider_id, position, retry_config_id, model_mapping FROM routes WHERE id = ?`, id)
 	return r.scanRoute(row)
 }
 
 func (r *RouteRepository) List() ([]*domain.Route, error) {
-	rows, err := r.db.db.Query(`SELECT id, created_at, updated_at, is_enabled, project_id, client_type, provider_id, position, retry_config_id, model_mapping FROM routes ORDER BY position`)
+	rows, err := r.db.db.Query(`SELECT id, created_at, updated_at, is_enabled, is_native, project_id, client_type, provider_id, position, retry_config_id, model_mapping FROM routes ORDER BY position`)
 	if err != nil {
 		return nil, err
 	}
@@ -84,9 +92,9 @@ func (r *RouteRepository) List() ([]*domain.Route, error) {
 
 func (r *RouteRepository) scanRoute(row *sql.Row) (*domain.Route, error) {
 	var route domain.Route
-	var isEnabled int
+	var isEnabled, isNative int
 	var mappingJSON string
-	err := row.Scan(&route.ID, &route.CreatedAt, &route.UpdatedAt, &isEnabled, &route.ProjectID, &route.ClientType, &route.ProviderID, &route.Position, &route.RetryConfigID, &mappingJSON)
+	err := row.Scan(&route.ID, &route.CreatedAt, &route.UpdatedAt, &isEnabled, &isNative, &route.ProjectID, &route.ClientType, &route.ProviderID, &route.Position, &route.RetryConfigID, &mappingJSON)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, domain.ErrNotFound
@@ -94,19 +102,21 @@ func (r *RouteRepository) scanRoute(row *sql.Row) (*domain.Route, error) {
 		return nil, err
 	}
 	route.IsEnabled = isEnabled == 1
+	route.IsNative = isNative == 1
 	route.ModelMapping = fromJSON[map[string]string](mappingJSON)
 	return &route, nil
 }
 
 func (r *RouteRepository) scanRouteRows(rows *sql.Rows) (*domain.Route, error) {
 	var route domain.Route
-	var isEnabled int
+	var isEnabled, isNative int
 	var mappingJSON string
-	err := rows.Scan(&route.ID, &route.CreatedAt, &route.UpdatedAt, &isEnabled, &route.ProjectID, &route.ClientType, &route.ProviderID, &route.Position, &route.RetryConfigID, &mappingJSON)
+	err := rows.Scan(&route.ID, &route.CreatedAt, &route.UpdatedAt, &isEnabled, &isNative, &route.ProjectID, &route.ClientType, &route.ProviderID, &route.Position, &route.RetryConfigID, &mappingJSON)
 	if err != nil {
 		return nil, err
 	}
 	route.IsEnabled = isEnabled == 1
+	route.IsNative = isNative == 1
 	route.ModelMapping = fromJSON[map[string]string](mappingJSON)
 	return &route, nil
 }
