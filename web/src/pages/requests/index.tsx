@@ -341,7 +341,7 @@ function LogRow({
       className={cn(
         "cursor-pointer group border-none transition-none",
         // Base hover
-        !isPending && !isRecent && "hover:bg-surface-hover/50",
+        !isRecent && "hover:bg-surface-hover/50",
 
         // Failed state - Red left border (via shadow) and subtle red bg
         isFailed && "bg-error/5 hover:bg-error/10 shadow-[inset_3px_0_0_0_rgba(239,68,68,0.4)]",
