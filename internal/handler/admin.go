@@ -99,12 +99,22 @@ func (h *AdminHandler) handleProviders(w http.ResponseWriter, r *http.Request, i
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "id required"})
 			return
 		}
+		// Get existing provider first for merge update
+		existing, err := h.svc.GetProvider(id)
+		if err != nil {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "provider not found"})
+			return
+		}
+		// Decode the update - for Provider, we expect full object updates from the form,
+		// but we still need to preserve ID and timestamps
 		var provider domain.Provider
 		if err := json.NewDecoder(r.Body).Decode(&provider); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
-		provider.ID = id
+		// Preserve ID and timestamps
+		provider.ID = existing.ID
+		provider.CreatedAt = existing.CreatedAt
 		if err := h.svc.UpdateProvider(&provider); err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
@@ -160,17 +170,71 @@ func (h *AdminHandler) handleRoutes(w http.ResponseWriter, r *http.Request, id u
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "id required"})
 			return
 		}
-		var route domain.Route
-		if err := json.NewDecoder(r.Body).Decode(&route); err != nil {
+		// Get existing route first for merge update
+		existing, err := h.svc.GetRoute(id)
+		if err != nil {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "route not found"})
+			return
+		}
+		// Decode partial update into a map to detect which fields were sent
+		var updates map[string]interface{}
+		if err := json.NewDecoder(r.Body).Decode(&updates); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
-		route.ID = id
-		if err := h.svc.UpdateRoute(&route); err != nil {
+		// Apply updates to existing route (with safe type assertions)
+		if v, ok := updates["isEnabled"]; ok {
+			if b, ok := v.(bool); ok {
+				existing.IsEnabled = b
+			}
+		}
+		if v, ok := updates["isNative"]; ok {
+			if b, ok := v.(bool); ok {
+				existing.IsNative = b
+			}
+		}
+		if v, ok := updates["projectID"]; ok {
+			if f, ok := v.(float64); ok {
+				existing.ProjectID = uint64(f)
+			}
+		}
+		if v, ok := updates["clientType"]; ok {
+			if s, ok := v.(string); ok {
+				existing.ClientType = domain.ClientType(s)
+			}
+		}
+		if v, ok := updates["providerID"]; ok {
+			if f, ok := v.(float64); ok {
+				existing.ProviderID = uint64(f)
+			}
+		}
+		if v, ok := updates["position"]; ok {
+			if f, ok := v.(float64); ok {
+				existing.Position = int(f)
+			}
+		}
+		if v, ok := updates["retryConfigID"]; ok {
+			if f, ok := v.(float64); ok {
+				existing.RetryConfigID = uint64(f)
+			}
+		}
+		if v, ok := updates["modelMapping"]; ok {
+			if v == nil {
+				existing.ModelMapping = nil
+			} else if m, ok := v.(map[string]interface{}); ok {
+				existing.ModelMapping = make(map[string]string)
+				for k, val := range m {
+					if s, ok := val.(string); ok {
+						existing.ModelMapping[k] = s
+					}
+				}
+			}
+		}
+		if err := h.svc.UpdateRoute(existing); err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
 		}
-		writeJSON(w, http.StatusOK, route)
+		writeJSON(w, http.StatusOK, existing)
 	case http.MethodDelete:
 		if id == 0 {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "id required"})
@@ -221,12 +285,19 @@ func (h *AdminHandler) handleProjects(w http.ResponseWriter, r *http.Request, id
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "id required"})
 			return
 		}
+		// Get existing project first to preserve timestamps
+		existing, err := h.svc.GetProject(id)
+		if err != nil {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "project not found"})
+			return
+		}
 		var project domain.Project
 		if err := json.NewDecoder(r.Body).Decode(&project); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
-		project.ID = id
+		project.ID = existing.ID
+		project.CreatedAt = existing.CreatedAt
 		if err := h.svc.UpdateProject(&project); err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
@@ -297,12 +368,19 @@ func (h *AdminHandler) handleRetryConfigs(w http.ResponseWriter, r *http.Request
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "id required"})
 			return
 		}
+		// Get existing config first to preserve timestamps
+		existing, err := h.svc.GetRetryConfig(id)
+		if err != nil {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "retry config not found"})
+			return
+		}
 		var config domain.RetryConfig
 		if err := json.NewDecoder(r.Body).Decode(&config); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
-		config.ID = id
+		config.ID = existing.ID
+		config.CreatedAt = existing.CreatedAt
 		if err := h.svc.UpdateRetryConfig(&config); err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return
@@ -358,12 +436,19 @@ func (h *AdminHandler) handleRoutingStrategies(w http.ResponseWriter, r *http.Re
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "id required"})
 			return
 		}
+		// Get existing strategy first to preserve timestamps
+		existing, err := h.svc.GetRoutingStrategy(id)
+		if err != nil {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "routing strategy not found"})
+			return
+		}
 		var strategy domain.RoutingStrategy
 		if err := json.NewDecoder(r.Body).Decode(&strategy); err != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 			return
 		}
-		strategy.ID = id
+		strategy.ID = existing.ID
+		strategy.CreatedAt = existing.CreatedAt
 		if err := h.svc.UpdateRoutingStrategy(&strategy); err != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 			return

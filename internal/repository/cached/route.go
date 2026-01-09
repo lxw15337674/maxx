@@ -1,6 +1,7 @@
 package cached
 
 import (
+	"sort"
 	"sync"
 
 	"github.com/Bowl42/maxx-next/internal/domain"
@@ -36,6 +37,7 @@ func (r *RouteRepository) Create(route *domain.Route) error {
 	}
 	r.mu.Lock()
 	r.cache = append(r.cache, route)
+	r.sortCacheLocked()
 	r.mu.Unlock()
 	return nil
 }
@@ -51,6 +53,7 @@ func (r *RouteRepository) Update(route *domain.Route) error {
 			break
 		}
 	}
+	r.sortCacheLocked()
 	r.mu.Unlock()
 	return nil
 }
@@ -96,4 +99,11 @@ func (r *RouteRepository) GetAll() []*domain.Route {
 	result := make([]*domain.Route, len(r.cache))
 	copy(result, r.cache)
 	return result
+}
+
+// sortCacheLocked sorts the cache by Position. Must be called with mu held.
+func (r *RouteRepository) sortCacheLocked() {
+	sort.Slice(r.cache, func(i, j int) bool {
+		return r.cache[i].Position < r.cache[j].Position
+	})
 }
