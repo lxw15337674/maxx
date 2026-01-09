@@ -121,9 +121,13 @@ func (e *Executor) Execute(ctx context.Context, w http.ResponseWriter, req *http
 
 	// Try routes in order with retry logic
 	var lastErr error
-	for _, matchedRoute := range routes {
+	for routeIdx, matchedRoute := range routes {
+		log.Printf("[Executor] Trying route %d/%d: routeID=%d, providerID=%d, provider=%s",
+			routeIdx+1, len(routes), matchedRoute.Route.ID, matchedRoute.Provider.ID, matchedRoute.Provider.Name)
+
 		// Check context before starting new route
 		if ctx.Err() != nil {
+			log.Printf("[Executor] Context cancelled before route %d", routeIdx+1)
 			return ctx.Err()
 		}
 
@@ -148,10 +152,17 @@ func (e *Executor) Execute(ctx context.Context, w http.ResponseWriter, req *http
 				ProviderID:     matchedRoute.Provider.ID,
 				Status:         "IN_PROGRESS",
 			}
+			log.Printf("[Executor] Creating attempt for route %d, attempt %d (proxyRequestID=%d, routeID=%d, providerID=%d)",
+				routeIdx+1, attempt+1, proxyReq.ID, matchedRoute.Route.ID, matchedRoute.Provider.ID)
 			if err := e.attemptRepo.Create(attemptRecord); err != nil {
-				// Log but continue
+				log.Printf("[Executor] Failed to create attempt record: %v", err)
+			} else {
+				log.Printf("[Executor] Created attempt record with ID=%d", attemptRecord.ID)
 			}
 			currentAttempt = attemptRecord
+
+			// Increment attempt count when creating a new attempt
+			proxyReq.ProxyUpstreamAttemptCount++
 
 			// Broadcast new attempt immediately
 			if e.broadcaster != nil {
@@ -162,9 +173,11 @@ func (e *Executor) Execute(ctx context.Context, w http.ResponseWriter, req *http
 			attemptCtx := ctxutil.WithUpstreamAttempt(ctx, attemptRecord)
 
 			// Execute request
+			log.Printf("[Executor] Route %d, attempt %d: executing...", routeIdx+1, attempt+1)
 			err := matchedRoute.ProviderAdapter.Execute(attemptCtx, w, req, matchedRoute.Provider)
 			if err == nil {
 				// Success
+				log.Printf("[Executor] Route %d, attempt %d: SUCCESS", routeIdx+1, attempt+1)
 				attemptRecord.Status = "COMPLETED"
 				_ = e.attemptRepo.Update(attemptRecord)
 				if e.broadcaster != nil {
@@ -187,30 +200,43 @@ func (e *Executor) Execute(ctx context.Context, w http.ResponseWriter, req *http
 			}
 
 			// Handle error
+			log.Printf("[Executor] Route %d, attempt %d: FAILED - %v", routeIdx+1, attempt+1, err)
 			lastErr = err
 
-			// Check if it's a context cancellation (client disconnect)
+			// Update attempt status first (before checking context)
 			if ctx.Err() != nil {
-				return ctx.Err()
+				attemptRecord.Status = "CANCELLED"
+			} else {
+				attemptRecord.Status = "FAILED"
 			}
-
-			attemptRecord.Status = "FAILED"
 			_ = e.attemptRepo.Update(attemptRecord)
 			if e.broadcaster != nil {
 				e.broadcaster.BroadcastProxyUpstreamAttempt(attemptRecord)
 			}
 			currentAttempt = nil // Clear so defer doesn't double update
-			proxyReq.ProxyUpstreamAttemptCount++
+
+			// Check if it's a context cancellation (client disconnect)
+			if ctx.Err() != nil {
+				log.Printf("[Executor] Context cancelled, stopping")
+				return ctx.Err()
+			}
 
 			// Check if retryable
 			proxyErr, ok := err.(*domain.ProxyError)
-			if !ok || !proxyErr.Retryable {
+			if !ok {
+				log.Printf("[Executor] Error is not ProxyError (type=%T), moving to next route", err)
 				break // Move to next route
 			}
+			if !proxyErr.Retryable {
+				log.Printf("[Executor] Error is not retryable, moving to next route")
+				break // Move to next route
+			}
+			log.Printf("[Executor] Error is retryable, will retry on same route")
 
 			// Wait before retry (unless last attempt)
 			if attempt < retryConfig.MaxRetries {
 				waitTime := e.calculateBackoff(retryConfig, attempt)
+				log.Printf("[Executor] Waiting %v before retry", waitTime)
 				select {
 				case <-ctx.Done():
 					return ctx.Err()
@@ -218,8 +244,12 @@ func (e *Executor) Execute(ctx context.Context, w http.ResponseWriter, req *http
 				}
 			}
 		}
+		// Inner loop ended, will try next route if available
+		log.Printf("[Executor] Route %d exhausted (retries: %d), moving to next route if available",
+			routeIdx+1, retryConfig.MaxRetries)
 	}
 
+	log.Printf("[Executor] All %d routes exhausted, request failed", len(routes))
 	// All routes failed
 	proxyReq.Status = "FAILED"
 	proxyReq.EndTime = time.Now()

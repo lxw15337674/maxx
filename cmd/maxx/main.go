@@ -130,6 +130,7 @@ func main() {
 		attemptRepo,
 		settingRepo,
 		*addr,
+		r, // Router implements ProviderAdapterRefresher interface
 	)
 
 	// Create handlers

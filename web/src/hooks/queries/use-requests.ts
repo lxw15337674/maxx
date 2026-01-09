@@ -4,7 +4,7 @@
 
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect } from 'react';
-import { getTransport, type ProxyRequest, type PaginationParams } from '@/lib/transport';
+import { getTransport, type ProxyRequest, type ProxyUpstreamAttempt, type PaginationParams } from '@/lib/transport';
 
 const transport = getTransport();
 
@@ -52,8 +52,8 @@ export function useProxyRequestUpdates() {
     // 确保 Transport 已连接
     transport.connect().catch(console.error);
 
-    // 订阅更新事件
-    const unsubscribe = transport.subscribe<ProxyRequest>(
+    // 订阅 ProxyRequest 更新事件
+    const unsubscribeRequest = transport.subscribe<ProxyRequest>(
       'proxy_request_update',
       (updatedRequest) => {
         // 更新单个请求的缓存
@@ -82,8 +82,30 @@ export function useProxyRequestUpdates() {
       }
     );
 
+    // 订阅 ProxyUpstreamAttempt 更新事件
+    const unsubscribeAttempt = transport.subscribe<ProxyUpstreamAttempt>(
+      'proxy_upstream_attempt_update',
+      (updatedAttempt) => {
+        // 更新 Attempts 缓存
+        queryClient.setQueryData<ProxyUpstreamAttempt[]>(
+          requestKeys.attempts(updatedAttempt.proxyRequestID),
+          (old) => {
+            if (!old) return [updatedAttempt];
+            const index = old.findIndex((a) => a.id === updatedAttempt.id);
+            if (index >= 0) {
+              const newList = [...old];
+              newList[index] = updatedAttempt;
+              return newList;
+            }
+            return [...old, updatedAttempt];
+          }
+        );
+      }
+    );
+
     return () => {
-      unsubscribe();
+      unsubscribeRequest();
+      unsubscribeAttempt();
     };
   }, [queryClient]);
 }

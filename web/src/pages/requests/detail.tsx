@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Button, Card, CardContent, CardHeader, CardTitle, Badge } from '@/components/ui';
-import { useProxyRequest, useProxyUpstreamAttempts, useProxyRequestUpdates } from '@/hooks/queries';
+import { useProxyRequest, useProxyUpstreamAttempts, useProxyRequestUpdates, useProviders } from '@/hooks/queries';
 import { ArrowLeft, Clock, Zap, AlertCircle, Server, CheckCircle, XCircle, Loader2, Ban } from 'lucide-react';
 import { statusVariant } from './index';
 import type { ProxyUpstreamAttempt } from '@/lib/transport';
@@ -11,12 +11,20 @@ export function RequestDetailPage() {
   const navigate = useNavigate();
   const { data: request, isLoading, error } = useProxyRequest(Number(id));
   const { data: attempts } = useProxyUpstreamAttempts(Number(id));
+  const { data: providers } = useProviders();
   const [selectedAttemptId, setSelectedAttemptId] = useState<number | null>(null);
   const [activeTab, setActiveTab] = useState<'request' | 'response'>('request');
 
   useProxyRequestUpdates();
 
   const selectedAttempt = attempts?.find(a => a.id === selectedAttemptId) ?? attempts?.[0];
+
+  // Create lookup map for provider names
+  const providerMap = useMemo(() => {
+    const map = new Map<number, string>();
+    providers?.forEach(p => map.set(p.id, p.name));
+    return map;
+  }, [providers]);
 
   const formatDuration = (ns: number) => {
     const ms = ns / 1_000_000;
@@ -96,6 +104,18 @@ export function RequestDetailPage() {
               <span className="font-mono">#{request.id}</span>
               <span>{request.clientType}</span>
               <span>{formatTime(request.startTime)}</span>
+              {attempts && attempts.length > 0 && (
+                <>
+                  <span>•</span>
+                  <span className="flex items-center gap-1">
+                    <Server className="h-3 w-3" />
+                    {providerMap.get(attempts[attempts.length - 1].providerID) || `Provider #${attempts[attempts.length - 1].providerID}`}
+                  </span>
+                </>
+              )}
+              {request.proxyUpstreamAttemptCount > 1 && (
+                <span className="text-amber-500">({request.proxyUpstreamAttemptCount} attempts)</span>
+              )}
             </div>
           </div>
         </div>
@@ -168,8 +188,9 @@ export function RequestDetailPage() {
                         </Badge>
                       )}
                     </div>
-                    <div className="mt-1 text-xs text-gray-500">
-                      Provider #{attempt.providerID}
+                    <div className="mt-1 flex items-center gap-1 text-xs text-gray-500">
+                      <Server className="h-3 w-3" />
+                      <span className="font-medium">{providerMap.get(attempt.providerID) || `Provider #${attempt.providerID}`}</span>
                     </div>
                     {(attempt.inputTokenCount > 0 || attempt.outputTokenCount > 0) && (
                       <div className="mt-1 text-xs text-gray-400">
@@ -184,6 +205,26 @@ export function RequestDetailPage() {
               <div className="min-w-0 flex-1">
                 {selectedAttempt ? (
                   <>
+                    {/* Provider Info Header */}
+                    <div className="border-b bg-gray-50 px-4 py-3 dark:bg-gray-900">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Server className="h-4 w-4 text-gray-400" />
+                          <span className="font-medium">
+                            {providerMap.get(selectedAttempt.providerID) || `Provider #${selectedAttempt.providerID}`}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2 text-sm text-gray-500">
+                          {selectedAttempt.routeID > 0 && (
+                            <span>Route #{selectedAttempt.routeID}</span>
+                          )}
+                          {selectedAttempt.cost > 0 && (
+                            <span className="font-medium text-green-600">${selectedAttempt.cost.toFixed(4)}</span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
                     {/* Tabs */}
                     <div className="flex border-b">
                       <button

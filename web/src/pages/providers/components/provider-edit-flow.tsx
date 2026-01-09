@@ -73,6 +73,7 @@ export function ProviderEditFlow({ provider, onClose }: ProviderEditFlowProps) {
 
       const data: Partial<CreateProviderData> = {
         name: formData.name,
+        type: provider.type || 'custom', // Preserve the provider type
         config: {
           custom: {
             baseURL: formData.baseURL,

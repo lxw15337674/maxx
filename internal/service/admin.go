@@ -8,6 +8,13 @@ import (
 	"github.com/Bowl42/maxx-next/internal/repository"
 )
 
+// ProviderAdapterRefresher is an interface for refreshing provider adapters
+// Implemented by Router to receive notifications when providers change
+type ProviderAdapterRefresher interface {
+	RefreshAdapter(p *domain.Provider) error
+	RemoveAdapter(providerID uint64)
+}
+
 // AdminService provides business logic for admin operations
 // Both HTTP handlers and Wails bindings call this service
 type AdminService struct {
@@ -21,6 +28,7 @@ type AdminService struct {
 	attemptRepo         repository.ProxyUpstreamAttemptRepository
 	settingRepo         repository.SystemSettingRepository
 	serverAddr          string
+	adapterRefresher    ProviderAdapterRefresher
 }
 
 // NewAdminService creates a new admin service
@@ -35,6 +43,7 @@ func NewAdminService(
 	attemptRepo repository.ProxyUpstreamAttemptRepository,
 	settingRepo repository.SystemSettingRepository,
 	serverAddr string,
+	adapterRefresher ProviderAdapterRefresher,
 ) *AdminService {
 	return &AdminService{
 		providerRepo:        providerRepo,
@@ -47,6 +56,7 @@ func NewAdminService(
 		attemptRepo:         attemptRepo,
 		settingRepo:         settingRepo,
 		serverAddr:          serverAddr,
+		adapterRefresher:    adapterRefresher,
 	}
 }
 
@@ -64,6 +74,10 @@ func (s *AdminService) CreateProvider(provider *domain.Provider) error {
 	if err := s.providerRepo.Create(provider); err != nil {
 		return err
 	}
+	// Refresh adapter cache for the new provider
+	if s.adapterRefresher != nil {
+		s.adapterRefresher.RefreshAdapter(provider)
+	}
 	// Auto-create routes for each supported client type
 	s.syncProviderRoutes(provider, nil)
 	return nil
@@ -80,6 +94,10 @@ func (s *AdminService) UpdateProvider(provider *domain.Provider) error {
 	if err := s.providerRepo.Update(provider); err != nil {
 		return err
 	}
+	// Refresh adapter cache for the updated provider
+	if s.adapterRefresher != nil {
+		s.adapterRefresher.RefreshAdapter(provider)
+	}
 	// Sync routes based on supportedClientTypes changes
 	s.syncProviderRoutesWithOldTypes(provider, oldSupportedClientTypes)
 	return nil
@@ -92,6 +110,10 @@ func (s *AdminService) DeleteProvider(id uint64) error {
 		if route.ProviderID == id {
 			s.routeRepo.Delete(route.ID)
 		}
+	}
+	// Remove adapter from cache
+	if s.adapterRefresher != nil {
+		s.adapterRefresher.RemoveAdapter(id)
 	}
 	return s.providerRepo.Delete(id)
 }

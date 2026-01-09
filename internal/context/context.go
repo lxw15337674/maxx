@@ -2,6 +2,7 @@ package context
 
 import (
 	"context"
+	"net/http"
 
 	"github.com/Bowl42/maxx-next/internal/domain"
 )
@@ -9,15 +10,17 @@ import (
 type contextKey string
 
 const (
-	CtxKeyClientType     contextKey = "client_type"
-	CtxKeySessionID      contextKey = "session_id"
-	CtxKeyProjectID      contextKey = "project_id"
-	CtxKeyRequestModel   contextKey = "request_model"
-	CtxKeyMappedModel    contextKey = "mapped_model"
-	CtxKeyResponseModel  contextKey = "response_model"
-	CtxKeyProxyRequest   contextKey = "proxy_request"
-	CtxKeyRequestBody    contextKey = "request_body"
+	CtxKeyClientType      contextKey = "client_type"
+	CtxKeySessionID       contextKey = "session_id"
+	CtxKeyProjectID       contextKey = "project_id"
+	CtxKeyRequestModel    contextKey = "request_model"
+	CtxKeyMappedModel     contextKey = "mapped_model"
+	CtxKeyResponseModel   contextKey = "response_model"
+	CtxKeyProxyRequest    contextKey = "proxy_request"
+	CtxKeyRequestBody     contextKey = "request_body"
 	CtxKeyUpstreamAttempt contextKey = "upstream_attempt"
+	CtxKeyRequestHeaders  contextKey = "request_headers"
+	CtxKeyRequestPath     contextKey = "request_path"
 )
 
 // Setters
@@ -55,6 +58,14 @@ func WithRequestBody(ctx context.Context, body []byte) context.Context {
 
 func WithUpstreamAttempt(ctx context.Context, attempt *domain.ProxyUpstreamAttempt) context.Context {
 	return context.WithValue(ctx, CtxKeyUpstreamAttempt, attempt)
+}
+
+func WithRequestHeaders(ctx context.Context, headers http.Header) context.Context {
+	return context.WithValue(ctx, CtxKeyRequestHeaders, headers)
+}
+
+func WithRequestPath(ctx context.Context, path string) context.Context {
+	return context.WithValue(ctx, CtxKeyRequestPath, path)
 }
 
 // Getters
@@ -119,4 +130,18 @@ func GetUpstreamAttempt(ctx context.Context) *domain.ProxyUpstreamAttempt {
 		return v
 	}
 	return nil
+}
+
+func GetRequestHeaders(ctx context.Context) http.Header {
+	if v, ok := ctx.Value(CtxKeyRequestHeaders).(http.Header); ok {
+		return v
+	}
+	return nil
+}
+
+func GetRequestPath(ctx context.Context) string {
+	if v, ok := ctx.Value(CtxKeyRequestPath).(string); ok {
+		return v
+	}
+	return ""
 }

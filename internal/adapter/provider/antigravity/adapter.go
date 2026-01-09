@@ -90,8 +90,17 @@ func (a *AntigravityAdapter) Execute(ctx context.Context, w http.ResponseWriter,
 		return domain.NewProxyErrorWithMessage(domain.ErrUpstreamError, true, "failed to create upstream request")
 	}
 
-	// Set headers
-	upstreamReq.Header.Set("Content-Type", "application/json")
+	// Forward original headers (filtered) - preserves application headers
+	originalHeaders := ctxutil.GetRequestHeaders(ctx)
+	copyHeadersFiltered(upstreamReq.Header, originalHeaders)
+
+	// Set content-type if not already set
+	if upstreamReq.Header.Get("Content-Type") == "" {
+		upstreamReq.Header.Set("Content-Type", "application/json")
+	}
+	// Disable compression to avoid gzip decode issues
+	upstreamReq.Header.Set("Accept-Encoding", "identity")
+	// Override auth with provider's token
 	upstreamReq.Header.Set("Authorization", "Bearer "+accessToken)
 
 	// Capture request info for attempt record
@@ -125,9 +134,13 @@ func (a *AntigravityAdapter) Execute(ctx context.Context, w http.ResponseWriter,
 			return domain.NewProxyErrorWithMessage(err, true, "failed to refresh access token")
 		}
 
-		// Retry request
+		// Retry request with same headers
 		upstreamReq, _ = http.NewRequestWithContext(ctx, "POST", upstreamURL, bytes.NewReader(upstreamBody))
-		upstreamReq.Header.Set("Content-Type", "application/json")
+		copyHeadersFiltered(upstreamReq.Header, originalHeaders)
+		if upstreamReq.Header.Get("Content-Type") == "" {
+			upstreamReq.Header.Set("Content-Type", "application/json")
+		}
+		upstreamReq.Header.Set("Accept-Encoding", "identity")
 		upstreamReq.Header.Set("Authorization", "Bearer "+accessToken)
 		resp, err = client.Do(upstreamReq)
 		if err != nil {
@@ -263,14 +276,8 @@ func (a *AntigravityAdapter) handleNonStreamResponse(ctx context.Context, w http
 		responseBody = body
 	}
 
-	// Copy headers
-	for k, v := range resp.Header {
-		if k != "Content-Length" && k != "Transfer-Encoding" {
-			for _, vv := range v {
-				w.Header().Add(k, vv)
-			}
-		}
-	}
+	// Copy upstream headers (except those we override)
+	copyResponseHeaders(w.Header(), resp.Header)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(resp.StatusCode)
 	_, _ = w.Write(responseBody)
@@ -287,7 +294,10 @@ func (a *AntigravityAdapter) handleStreamResponse(ctx context.Context, w http.Re
 		}
 	}
 
-	// Set streaming headers
+	// Copy upstream headers (except those we override)
+	copyResponseHeaders(w.Header(), resp.Header)
+
+	// Set/override streaming headers
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
@@ -393,4 +403,88 @@ func flattenHeaders(h http.Header) map[string]string {
 		}
 	}
 	return result
+}
+
+// Headers to filter out - only privacy/proxy related, NOT application headers
+var filteredHeaders = map[string]bool{
+	// IP and client identification headers (privacy protection)
+	"x-forwarded-for":  true,
+	"x-forwarded-host": true,
+	"x-forwarded-proto": true,
+	"x-forwarded-port": true,
+	"x-real-ip":        true,
+	"x-client-ip":      true,
+	"x-originating-ip": true,
+	"x-remote-ip":      true,
+	"x-remote-addr":    true,
+	"forwarded":        true,
+
+	// CDN/Cloud provider headers
+	"cf-connecting-ip": true,
+	"cf-ipcountry":     true,
+	"cf-ray":           true,
+	"cf-visitor":       true,
+	"true-client-ip":   true,
+	"fastly-client-ip": true,
+	"x-azure-clientip": true,
+	"x-azure-fdid":     true,
+	"x-azure-ref":      true,
+
+	// Tracing headers
+	"x-request-id":     true,
+	"x-correlation-id": true,
+	"x-trace-id":       true,
+	"x-amzn-trace-id":  true,
+	"x-b3-traceid":     true,
+	"x-b3-spanid":      true,
+	"x-b3-parentspanid": true,
+	"x-b3-sampled":     true,
+	"traceparent":      true,
+	"tracestate":       true,
+
+	// Headers that will be overridden
+	"host":          true,
+	"content-length": true,
+	"authorization": true,
+	"x-api-key":     true,
+}
+
+// copyHeadersFiltered copies headers from src to dst, filtering out sensitive headers
+func copyHeadersFiltered(dst, src http.Header) {
+	if src == nil {
+		return
+	}
+	for key, values := range src {
+		lowerKey := strings.ToLower(key)
+		if filteredHeaders[lowerKey] {
+			continue
+		}
+		for _, v := range values {
+			dst.Add(key, v)
+		}
+	}
+}
+
+// Response headers to exclude when copying
+var excludedResponseHeaders = map[string]bool{
+	"content-length":    true,
+	"transfer-encoding": true,
+	"connection":        true,
+	"keep-alive":        true,
+}
+
+// copyResponseHeaders copies response headers from upstream, excluding certain headers
+func copyResponseHeaders(dst, src http.Header) {
+	if src == nil {
+		return
+	}
+	for key, values := range src {
+		lowerKey := strings.ToLower(key)
+		if excludedResponseHeaders[lowerKey] {
+			continue
+		}
+		for _, v := range values {
+			dst.Add(key, v)
+		}
+	}
 }

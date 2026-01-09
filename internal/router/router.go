@@ -53,16 +53,22 @@ func (r *Router) InitAdapters() error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	log.Printf("[Router] InitAdapters: found %d providers", len(providers))
+
 	for _, p := range providers {
+		log.Printf("[Router] InitAdapters: provider id=%d, type=%s", p.ID, p.Type)
 		factory, ok := provider.GetAdapterFactory(p.Type)
 		if !ok {
+			log.Printf("[Router] InitAdapters: no factory for type %s", p.Type)
 			continue // Skip providers without registered adapters
 		}
 		a, err := factory(p)
 		if err != nil {
+			log.Printf("[Router] InitAdapters: factory error for provider %d: %v", p.ID, err)
 			return err
 		}
 		r.adapters[p.ID] = a
+		log.Printf("[Router] InitAdapters: adapter created for provider %d", p.ID)
 	}
 	return nil
 }
