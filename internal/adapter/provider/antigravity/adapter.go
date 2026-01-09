@@ -57,8 +57,8 @@ func (a *AntigravityAdapter) Execute(ctx context.Context, w http.ResponseWriter,
 	mappedModel := ctxutil.GetMappedModel(ctx)
 	requestBody := ctxutil.GetRequestBody(ctx)
 
-	// Determine if streaming
-	stream := isStreamRequest(requestBody)
+	// Get streaming flag from context (already detected correctly for Gemini URL path)
+	stream := ctxutil.GetIsStream(ctx)
 
 	// Get access token
 	accessToken, err := a.getAccessToken(ctx)

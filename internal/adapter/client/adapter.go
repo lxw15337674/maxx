@@ -278,7 +278,17 @@ func (a *Adapter) ExtractSessionID(req *http.Request, body []byte, clientType do
 }
 
 // IsStreamRequest checks if the request is for streaming
-func (a *Adapter) IsStreamRequest(body []byte) bool {
+// For Gemini: check URL path for "streamGenerateContent"
+// For Claude/OpenAI: check body for "stream: true"
+func (a *Adapter) IsStreamRequest(req *http.Request, body []byte) bool {
+	path := req.URL.Path
+
+	// Gemini uses URL path to indicate streaming
+	if strings.Contains(path, "streamGenerateContent") {
+		return true
+	}
+
+	// Claude/OpenAI use body field
 	var data map[string]interface{}
 	if err := json.Unmarshal(body, &data); err != nil {
 		return false
