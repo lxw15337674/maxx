@@ -1,9 +1,10 @@
-import { GripVertical, Settings, Zap, RefreshCw, Trash2 } from 'lucide-react';
+import { GripVertical, Settings, Zap, RefreshCw, Trash2, Activity } from 'lucide-react';
 import { Switch } from '@/components/ui';
 import { StreamingBadge } from '@/components/ui/streaming-badge';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { getProviderColor } from '@/lib/provider-colors';
+import { cn } from '@/lib/utils';
 import type { ClientType, ProviderStats } from '@/lib/transport';
 import type { ProviderConfigItem } from '../types';
 
@@ -198,39 +199,72 @@ export function ProviderRowContent({
       </div>
 
       {/* Provider Stats */}
-      {stats && stats.totalRequests > 0 && (
-        <div className={`relative z-10 flex items-center gap-3 text-[10px] ${enabled ? '' : 'opacity-40'}`}>
-          {/* Success Rate */}
-          <div className="flex flex-col items-center" title="成功率">
-            <span className={`font-bold ${stats.successRate >= 90 ? 'text-emerald-400' : stats.successRate >= 70 ? 'text-amber-400' : 'text-red-400'}`}>
-              {stats.successRate.toFixed(1)}%
-            </span>
-            <span className="text-text-muted/60">成功</span>
+      <div className={`relative z-10 flex items-center gap-2 bg-surface-secondary/30 rounded-lg p-1 border border-border/30 ${enabled ? '' : 'opacity-40'}`}>
+        {stats && stats.totalRequests > 0 ? (
+          <>
+            {/* Success Rate */}
+            <div className="flex flex-col items-center justify-center px-3 py-1 min-w-[60px]">
+              <span className="text-[10px] text-text-muted uppercase tracking-wider font-medium mb-0.5">成功</span>
+              <span className={cn(
+                "font-mono font-bold text-sm",
+                stats.successRate >= 95 ? "text-emerald-400" :
+                stats.successRate >= 90 ? "text-blue-400" :
+                stats.successRate >= 80 ? "text-amber-400" : "text-red-400"
+              )}>
+                {stats.successRate.toFixed(1)}%
+              </span>
+            </div>
+
+            <div className="w-px h-8 bg-border/40" />
+
+            {/* Request Count */}
+            <div className="flex flex-col items-center justify-center px-3 py-1 min-w-[60px]" title={`成功: ${stats.successfulRequests}, 失败: ${stats.failedRequests}`}>
+              <span className="text-[10px] text-text-muted uppercase tracking-wider font-medium mb-0.5">请求</span>
+              <span className="font-mono font-bold text-sm text-text-primary">{stats.totalRequests}</span>
+            </div>
+
+            <div className="w-px h-8 bg-border/40" />
+
+            {/* Token Usage */}
+            <div className="flex flex-col items-center justify-center px-3 py-1 min-w-[60px]" title={`输入: ${stats.totalInputTokens}, 输出: ${stats.totalOutputTokens}`}>
+              <span className="text-[10px] text-text-muted uppercase tracking-wider font-medium mb-0.5">Token</span>
+              <span className="font-mono font-bold text-sm text-blue-400">
+                {formatTokens(stats.totalInputTokens + stats.totalOutputTokens)}
+              </span>
+            </div>
+
+            <div className="w-px h-8 bg-border/40" />
+
+            {/* Cache Rate */}
+            <div
+              className="flex flex-col items-center justify-center px-3 py-1 min-w-[60px]"
+              title={`Read: ${formatTokens(stats.totalCacheRead)} | Write: ${formatTokens(stats.totalCacheWrite)}`}
+            >
+              <span className="text-[10px] text-text-muted uppercase tracking-wider font-medium mb-0.5">缓存</span>
+              <span className={cn(
+                "font-mono font-bold text-sm",
+                calcCacheRate(stats) >= 50 ? "text-emerald-400" :
+                calcCacheRate(stats) >= 20 ? "text-cyan-400" : "text-text-secondary"
+              )}>
+                {calcCacheRate(stats).toFixed(1)}%
+              </span>
+            </div>
+
+            <div className="w-px h-8 bg-border/40" />
+
+            {/* Cost */}
+            <div className="flex flex-col items-center justify-center px-3 py-1 min-w-[60px]" title={`总成本: ${formatCost(stats.totalCost)}`}>
+              <span className="text-[10px] text-text-muted uppercase tracking-wider font-medium mb-0.5">成本</span>
+              <span className="font-mono font-bold text-sm text-purple-400">{formatCost(stats.totalCost)}</span>
+            </div>
+          </>
+        ) : (
+          <div className="px-4 py-2 flex items-center gap-2 text-text-muted/50">
+            <Activity size={14} />
+            <span className="text-xs font-medium">暂无数据</span>
           </div>
-          {/* Request Count */}
-          <div className="flex flex-col items-center" title={`总请求: ${stats.totalRequests}, 成功: ${stats.successfulRequests}, 失败: ${stats.failedRequests}`}>
-            <span className="font-bold text-text-primary">{stats.totalRequests}</span>
-            <span className="text-text-muted/60">请求</span>
-          </div>
-          {/* Token Usage */}
-          <div className="flex flex-col items-center" title={`输入: ${stats.totalInputTokens}, 输出: ${stats.totalOutputTokens}`}>
-            <span className="font-bold text-blue-400">{formatTokens(stats.totalInputTokens + stats.totalOutputTokens)}</span>
-            <span className="text-text-muted/60">Token</span>
-          </div>
-          {/* Cache Rate */}
-          <div className="flex flex-col items-center" title={`Read: ${formatTokens(stats.totalCacheRead)} | Write: ${formatTokens(stats.totalCacheWrite)}`}>
-            <span className={`font-bold ${calcCacheRate(stats) >= 50 ? 'text-emerald-400' : calcCacheRate(stats) >= 20 ? 'text-cyan-400' : 'text-text-secondary'}`}>
-              {calcCacheRate(stats).toFixed(1)}%
-            </span>
-            <span className="text-text-muted/60">缓存</span>
-          </div>
-          {/* Cost */}
-          <div className="flex flex-col items-center" title={`总成本: ${formatCost(stats.totalCost)}`}>
-            <span className="font-bold text-purple-400">{formatCost(stats.totalCost)}</span>
-            <span className="text-text-muted/60">成本</span>
-          </div>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* Settings button */}
       {route && (
