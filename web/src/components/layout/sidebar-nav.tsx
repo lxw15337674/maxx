@@ -8,7 +8,6 @@ import {
   FolderKanban,
   Users,
   RefreshCw,
-  Shuffle,
   Radio,
   Check,
   Copy,
@@ -42,7 +41,6 @@ const managementItems: NavItem[] = [
 
 const configItems: NavItem[] = [
   { to: '/retry-configs', icon: RefreshCw, label: 'Retry Configs' },
-  { to: '/routing-strategies', icon: Shuffle, label: 'Strategies' },
   { to: '/settings', icon: Settings, label: 'Settings' },
 ];
 

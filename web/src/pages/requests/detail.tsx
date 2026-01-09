@@ -77,9 +77,9 @@ export function RequestDetailPage() {
   const getStatusIcon = (status: string) => {
     switch (status) {
       case 'COMPLETED':
-        return <CheckCircle className="h-4 w-4 text-success" />;
+        return <CheckCircle className="h-4 w-4 text-blue-400" />;
       case 'FAILED':
-        return <XCircle className="h-4 w-4 text-error" />;
+        return <XCircle className="h-4 w-4 text-red-400" />;
       case 'CANCELLED':
         return <Ban className="h-4 w-4 text-warning" />;
       case 'IN_PROGRESS':
@@ -100,8 +100,8 @@ export function RequestDetailPage() {
   if (error || !request) {
     return (
       <div className="flex flex-col items-center justify-center h-full space-y-4 bg-background">
-        <div className="p-4 bg-error/10 rounded-full">
-          <AlertCircle className="h-12 w-12 text-error" />
+        <div className="p-4 bg-red-400/10 rounded-full">
+          <AlertCircle className="h-12 w-12 text-red-400" />
         </div>
         <h3 className="text-lg font-semibold text-text-primary">Request Not Found</h3>
         <p className="text-text-secondary">The request doesn't exist or has been deleted.</p>
@@ -116,11 +116,11 @@ export function RequestDetailPage() {
   return (
     <div className="flex flex-col h-full overflow-hidden bg-background">
       {/* Header */}
-      <div className="border-b border-border bg-surface-primary flex-shrink-0 px-4 py-4">
-        <div className="flex items-start justify-between gap-6">
+      <div className="h-[73px] border-b border-border bg-surface-primary flex-shrink-0 px-6 flex items-center">
+        <div className="flex items-center justify-between gap-6 w-full">
           {/* Left: Back + Main Info */}
-          <div className="flex items-start gap-3 min-w-0">
-            <Button variant="ghost" size="icon" onClick={() => navigate('/requests')} className="h-8 w-8 -ml-2 mt-0.5 text-text-secondary hover:text-text-primary flex-shrink-0">
+          <div className="flex items-center gap-3 min-w-0">
+            <Button variant="ghost" size="icon" onClick={() => navigate('/requests')} className="h-8 w-8 -ml-2 text-text-secondary hover:text-text-primary flex-shrink-0">
               <ArrowLeft className="h-5 w-5" />
             </Button>
             <div
@@ -131,14 +131,14 @@ export function RequestDetailPage() {
             </div>
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2 flex-wrap">
-                <h2 className="text-lg font-semibold text-text-primary tracking-tight">
+                <h2 className="text-lg font-semibold text-text-primary tracking-tight leading-none">
                   {request.requestModel || 'Unknown Model'}
                 </h2>
                 <Badge variant={statusVariant[request.status]} className="capitalize">
                   {request.status.toLowerCase().replace('_', ' ')}
                 </Badge>
               </div>
-              <div className="flex items-center gap-3 mt-1 text-xs text-text-muted">
+              <div className="flex items-center gap-3 mt-1.5 text-xs text-text-muted leading-none">
                 <span className="font-mono bg-surface-secondary px-1.5 py-0.5 rounded">#{request.id}</span>
                 <span>{getClientName(request.clientType as ClientType)}</span>
                 <span>·</span>
@@ -192,7 +192,7 @@ export function RequestDetailPage() {
             <div className="w-px h-8 bg-border" />
             <div className="text-center px-3">
               <div className="text-[10px] uppercase tracking-wider text-text-muted mb-0.5">Cost</div>
-              <div className="text-sm font-mono font-medium text-success">
+              <div className="text-sm font-mono font-medium text-blue-400">
                 {request.cost > 0 ? `$${request.cost.toFixed(4)}` : '-'}
               </div>
             </div>
@@ -202,11 +202,11 @@ export function RequestDetailPage() {
 
        {/* Error Banner */}
        {request.error && (
-        <div className="flex-shrink-0 bg-error/10 border-b border-error/20 px-6 py-3 flex items-start gap-3">
-           <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-error" />
+        <div className="flex-shrink-0 bg-red-400/10 border-b border-red-400/20 px-6 py-3 flex items-start gap-3">
+           <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-400" />
            <div className="flex-1">
-             <h4 className="text-sm font-medium text-error mb-1">Request Failed</h4>
-             <pre className="whitespace-pre-wrap break-words font-mono text-xs text-error/90 max-h-24 overflow-auto">
+             <h4 className="text-sm font-medium text-red-400 mb-1">Request Failed</h4>
+             <pre className="whitespace-pre-wrap break-words font-mono text-xs text-red-400/90 max-h-24 overflow-auto">
                {request.error}
              </pre>
            </div>
@@ -217,7 +217,7 @@ export function RequestDetailPage() {
       <div className="flex-1 flex overflow-hidden">
          {/* Sidebar: Attempts List */}
          <div className="w-80 flex flex-col border-r border-border bg-surface-primary flex-shrink-0">
-            <div className="p-3 border-b border-border bg-surface-secondary/50 flex items-center justify-between">
+            <div className="h-16 px-4 border-b border-border bg-surface-secondary/50 flex items-center justify-between flex-shrink-0">
                <span className="text-xs font-semibold text-text-secondary uppercase tracking-wider flex items-center gap-2">
                  <Server size={12} /> Attempts
                </span>
@@ -248,7 +248,7 @@ export function RequestDetailPage() {
                           {attempt.responseInfo && (
                             <span className={cn(
                               "text-[10px] font-mono px-1.5 py-0.5 rounded font-medium",
-                              attempt.responseInfo.status >= 400 ? "text-error bg-error/10" : "text-success bg-success/10"
+                              attempt.responseInfo.status >= 400 ? "text-red-400 bg-red-400/10" : "text-blue-400 bg-blue-400/10"
                             )}>
                               {attempt.responseInfo.status}
                             </span>
@@ -279,7 +279,7 @@ export function RequestDetailPage() {
             {selectedAttempt ? (
                <>
                  {/* Detail Header */}
-                 <div className="border-b border-border bg-surface-secondary/20 px-6 py-3 flex items-center justify-between flex-shrink-0 backdrop-blur-sm sticky top-0 z-10">
+                 <div className="h-16 border-b border-border bg-surface-secondary/20 px-6 flex items-center justify-between flex-shrink-0 backdrop-blur-sm sticky top-0 z-10">
                     <div className="flex items-center gap-4">
                       <div className="w-10 h-10 rounded-lg bg-surface-primary flex items-center justify-center text-text-primary shadow-sm border border-border">
                          <Server size={20} />
@@ -289,8 +289,8 @@ export function RequestDetailPage() {
                           {providerMap.get(selectedAttempt.providerID) || `Provider #${selectedAttempt.providerID}`}
                         </h3>
                          <div className="flex items-center gap-3 text-xs text-text-secondary mt-0.5">
-                           {selectedAttempt.routeID > 0 && <span>Route ID: {selectedAttempt.routeID}</span>}
-                           {selectedAttempt.cost > 0 && <span className="text-success font-medium">Cost: ${selectedAttempt.cost.toFixed(6)}</span>}
+                           <span>Attempt #{selectedAttempt.id}</span>
+                           {selectedAttempt.cost > 0 && <span className="text-blue-400 font-medium">Cost: ${selectedAttempt.cost.toFixed(6)}</span>}
                          </div>
                       </div>
                     </div>
@@ -394,7 +394,7 @@ export function RequestDetailPage() {
                            <div className="flex items-center gap-3 p-3 bg-surface-secondary/30 rounded-lg border border-border flex-shrink-0">
                             <div className={cn(
                               "px-2 py-1 rounded text-xs font-bold font-mono",
-                              selectedAttempt.responseInfo.status >= 400 ? "bg-error/10 text-error" : "bg-success/10 text-success"
+                              selectedAttempt.responseInfo.status >= 400 ? "bg-red-400/10 text-red-400" : "bg-blue-400/10 text-blue-400"
                             )}>
                               {selectedAttempt.responseInfo.status}
                             </div>
@@ -511,7 +511,7 @@ export function RequestDetailPage() {
                                        )}
                                        <div className="flex justify-between items-center">
                                           <dt className="text-xs font-medium text-text-secondary uppercase tracking-wider">Cost</dt>
-                                          <dd className="text-sm text-success font-mono font-medium">${selectedAttempt.cost.toFixed(6)}</dd>
+                                          <dd className="text-sm text-blue-400 font-mono font-medium">${selectedAttempt.cost.toFixed(6)}</dd>
                                        </div>
                                    </CardContent>
                                 </Card>
