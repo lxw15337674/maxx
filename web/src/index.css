@@ -461,36 +461,21 @@ body {
   animation: marquee 1s linear infinite;
 }
 
-/* Marquee effect for table rows using pseudo-element */
+/* Marquee effect for table rows - direct background animation */
 .animate-marquee-row {
-  position: relative;
-}
-
-.animate-marquee-row::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  z-index: 0;
-  opacity: 0.25;
-  background-color: rgba(0, 120, 212, 0.15);
+  background-color: rgba(0, 120, 212, 0.08);
   background-image: linear-gradient(
     135deg,
-    rgba(255, 255, 255, 0.15) 25%,
+    rgba(0, 120, 212, 0.08) 25%,
     transparent 25%,
     transparent 50%,
-    rgba(255, 255, 255, 0.15) 50%,
-    rgba(255, 255, 255, 0.15) 75%,
+    rgba(0, 120, 212, 0.08) 50%,
+    rgba(0, 120, 212, 0.08) 75%,
     transparent 75%,
     transparent
   );
   background-size: 1rem 1rem;
   animation: marquee 1s linear infinite;
-}
-
-.animate-marquee-row > * {
-  position: relative;
-  z-index: 1;
 }
 
 /* Provider Colors */
