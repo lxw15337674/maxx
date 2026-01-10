@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/Bowl42/maxx-next/internal/adapter/provider"
-	"github.com/Bowl42/maxx-next/internal/converter"
 	ctxutil "github.com/Bowl42/maxx-next/internal/context"
 	"github.com/Bowl42/maxx-next/internal/cooldown"
 	"github.com/Bowl42/maxx-next/internal/domain"
@@ -32,7 +31,6 @@ type TokenCache struct {
 
 type AntigravityAdapter struct {
 	provider   *domain.Provider
-	converter  *converter.Registry
 	tokenCache *TokenCache
 	tokenMu    sync.RWMutex
 }
@@ -43,7 +41,6 @@ func NewAdapter(p *domain.Provider) (provider.ProviderAdapter, error) {
 	}
 	return &AntigravityAdapter{
 		provider:   p,
-		converter:  converter.NewRegistry(),
 		tokenCache: &TokenCache{},
 	}, nil
 }
@@ -82,49 +79,28 @@ func (a *AntigravityAdapter) Execute(ctx context.Context, w http.ResponseWriter,
 		return domain.NewProxyErrorWithMessage(err, true, "failed to get access token")
 	}
 
-	// Antigravity uses Gemini format
-	targetType := domain.ClientTypeGemini
-	needsConversion := clientType != targetType
-
-	// [CRITICAL FIX] Pre-clean cache_control from request body (like Antigravity-Manager)
-	// VS Code and other clients send back historical messages with cache_control
-	// which causes "Extra inputs are not permitted" errors
-	// This MUST be done BEFORE any transformation
-	if clientType == domain.ClientTypeClaude {
-		requestBody = cleanCacheControlFromRequest(requestBody)
-	}
-
-	// Transform request if needed
-	var geminiBody []byte
-	if needsConversion {
-		geminiBody, err = a.converter.TransformRequest(clientType, targetType, requestBody, mappedModel, stream)
-		if err != nil {
-			return domain.NewProxyErrorWithMessage(domain.ErrFormatConversion, true, "failed to transform request")
-		}
-	} else {
-		// For Gemini, unwrap CLI envelope if present
-		geminiBody = unwrapGeminiCLIEnvelope(requestBody)
-	}
-
 	// [SessionID Support] Extract metadata.user_id from original request for sessionId (like Antigravity-Manager)
 	sessionID := extractSessionID(requestBody)
 
-	// [Post-Processing] Apply Claude request post-processing (like CLIProxyAPI)
-	// - Inject interleaved thinking hint when tools + thinking enabled
-	// - Use cached signatures for thinking blocks
-	// - Apply skip_thought_signature_validator for tool calls without valid signatures
-	// - Smart thinking downgrade when history is incompatible
+	// Transform request based on client type
+	var geminiBody []byte
 	if clientType == domain.ClientTypeClaude {
-		// Determine if thinking should be enabled (considering model defaults like Opus 4.5)
-		hasThinking := HasThinkingEnabledWithModel(requestBody, mappedModel)
+		// Use direct transformation (no converter dependency)
+		// This combines cache control cleanup, thinking filter, tool loop recovery,
+		// system instruction building, content transformation, tool building, and generation config
+		geminiBody, err = TransformClaudeToGemini(requestBody, mappedModel, stream, sessionID, GlobalSignatureCache())
+		if err != nil {
+			return domain.NewProxyErrorWithMessage(err, true, fmt.Sprintf("failed to transform Claude request: %v", err))
+		}
 
-		// Check if target model supports thinking
+		// Apply additional post-processing for advanced features
+		// (interleaved hint, toolConfig, signature validation)
+		hasThinking := HasThinkingEnabledWithModel(requestBody, mappedModel)
 		if hasThinking && !TargetModelSupportsThinking(mappedModel) {
 			hasThinking = false
 		}
 
-		// Check if thinking should be disabled due to history (like Antigravity-Manager)
-		// Scenario: last Assistant message has ToolUse but no Thinking block
+		// Check if thinking should be disabled due to history
 		if hasThinking {
 			var req map[string]interface{}
 			if err := json.Unmarshal(geminiBody, &req); err == nil {
@@ -136,7 +112,14 @@ func (a *AntigravityAdapter) Execute(ctx context.Context, w http.ResponseWriter,
 			}
 		}
 
-		geminiBody = PostProcessClaudeRequest(geminiBody, sessionID, hasThinking, requestBody, mappedModel)
+		// Apply minimal post-processing for features not yet fully integrated
+		geminiBody = applyClaudePostProcess(geminiBody, sessionID, hasThinking, requestBody, mappedModel)
+	} else if clientType == domain.ClientTypeOpenAI {
+		// TODO: Implement OpenAI transformation in the future
+		return domain.NewProxyErrorWithMessage(domain.ErrFormatConversion, true, "OpenAI transformation not yet implemented")
+	} else {
+		// For Gemini, unwrap CLI envelope if present
+		geminiBody = unwrapGeminiCLIEnvelope(requestBody)
 	}
 
 	// Wrap request in v1internal format
@@ -243,9 +226,9 @@ func (a *AntigravityAdapter) Execute(ctx context.Context, w http.ResponseWriter,
 
 	// Handle response
 	if stream {
-		return a.handleStreamResponse(ctx, w, resp, clientType, targetType, needsConversion)
+		return a.handleStreamResponse(ctx, w, resp, clientType)
 	}
-	return a.handleNonStreamResponse(ctx, w, resp, clientType, targetType, needsConversion)
+	return a.handleNonStreamResponse(ctx, w, resp, clientType)
 }
 
 func (a *AntigravityAdapter) getAccessToken(ctx context.Context) (string, error) {
@@ -312,6 +295,53 @@ func refreshGoogleToken(ctx context.Context, refreshToken string) (string, int, 
 	return result.AccessToken, result.ExpiresIn, nil
 }
 
+// applyClaudePostProcess applies minimal post-processing for advanced features
+// not yet fully integrated into the transform functions
+func applyClaudePostProcess(geminiBody []byte, sessionID string, hasThinking bool, claudeRequest []byte, mappedModel string) []byte {
+	var request map[string]interface{}
+	if err := json.Unmarshal(geminiBody, &request); err != nil {
+		return geminiBody
+	}
+
+	modified := false
+
+	// 1. Inject interleaved thinking hint when tools + thinking enabled
+	hasTools := hasToolDeclarations(request)
+	if hasThinking && hasTools {
+		if injectInterleavedHint(request) {
+			modified = true
+		}
+	}
+
+	// 2. Inject toolConfig with VALIDATED mode when tools exist
+	if InjectToolConfig(request) {
+		modified = true
+	}
+
+	// 3. Process contents for additional signature validation
+	if contents, ok := request["contents"].([]interface{}); ok {
+		if processContentsForSignatures(contents, sessionID, mappedModel) {
+			modified = true
+		}
+	}
+
+	// 4. Clean thinking fields if disabled
+	if !hasThinking {
+		CleanThinkingFieldsRecursive(request)
+		modified = true
+	}
+
+	if !modified {
+		return geminiBody
+	}
+
+	result, err := json.Marshal(request)
+	if err != nil {
+		return geminiBody
+	}
+	return result
+}
+
 // v1internal endpoint (same as Antigravity-Manager)
 const (
 	V1InternalBaseURL = "https://cloudcode-pa.googleapis.com/v1internal"
@@ -324,7 +354,7 @@ func (a *AntigravityAdapter) buildUpstreamURL(stream bool) string {
 	return fmt.Sprintf("%s:generateContent", V1InternalBaseURL)
 }
 
-func (a *AntigravityAdapter) handleNonStreamResponse(ctx context.Context, w http.ResponseWriter, resp *http.Response, clientType, targetType domain.ClientType, needsConversion bool) error {
+func (a *AntigravityAdapter) handleNonStreamResponse(ctx context.Context, w http.ResponseWriter, resp *http.Response, clientType domain.ClientType) error {
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return domain.NewProxyErrorWithMessage(domain.ErrUpstreamError, true, "failed to read upstream response")
@@ -359,19 +389,18 @@ func (a *AntigravityAdapter) handleNonStreamResponse(ctx context.Context, w http
 
 	var responseBody []byte
 
-	// Use specialized Claude response conversion (like Antigravity-Manager)
+	// Transform response based on client type
 	if clientType == domain.ClientTypeClaude {
 		requestModel := ctxutil.GetRequestModel(ctx)
 		responseBody, err = convertGeminiToClaudeResponse(unwrappedBody, requestModel)
 		if err != nil {
 			return domain.NewProxyErrorWithMessage(domain.ErrFormatConversion, false, "failed to transform response")
 		}
-	} else if needsConversion {
-		responseBody, err = a.converter.TransformResponse(targetType, clientType, unwrappedBody)
-		if err != nil {
-			return domain.NewProxyErrorWithMessage(domain.ErrFormatConversion, false, "failed to transform response")
-		}
+	} else if clientType == domain.ClientTypeOpenAI {
+		// TODO: Implement OpenAI response transformation
+		return domain.NewProxyErrorWithMessage(domain.ErrFormatConversion, false, "OpenAI response transformation not yet implemented")
 	} else {
+		// Gemini native
 		responseBody = unwrappedBody
 	}
 
@@ -383,7 +412,7 @@ func (a *AntigravityAdapter) handleNonStreamResponse(ctx context.Context, w http
 	return nil
 }
 
-func (a *AntigravityAdapter) handleStreamResponse(ctx context.Context, w http.ResponseWriter, resp *http.Response, clientType, targetType domain.ClientType, needsConversion bool) error {
+func (a *AntigravityAdapter) handleStreamResponse(ctx context.Context, w http.ResponseWriter, resp *http.Response, clientType domain.ClientType) error {
 	attempt := ctxutil.GetUpstreamAttempt(ctx)
 
 	// Capture response info (for streaming, we only capture status and headers)
@@ -419,12 +448,9 @@ func (a *AntigravityAdapter) handleStreamResponse(ctx context.Context, w http.Re
 	// Get original request model for Claude response (like Antigravity-Manager)
 	requestModel := ctxutil.GetRequestModel(ctx)
 
-	var state *converter.TransformState
 	var claudeState *ClaudeStreamingState
 	if isClaudeClient {
 		claudeState = NewClaudeStreamingStateWithSession(sessionID, requestModel)
-	} else if needsConversion {
-		state = converter.NewTransformState()
 	}
 
 	// Collect all SSE events for response body and token extraction
@@ -493,14 +519,11 @@ func (a *AntigravityAdapter) handleStreamResponse(ctx context.Context, w http.Re
 				if isClaudeClient {
 					// Use specialized Claude SSE transformation
 					output = claudeState.ProcessGeminiSSELine(string(unwrappedLine))
-				} else if needsConversion {
-					// Transform the chunk using generic converter
-					transformed, transformErr := a.converter.TransformStreamChunk(targetType, clientType, unwrappedLine, state)
-					if transformErr != nil {
-						continue // Skip malformed chunks
-					}
-					output = transformed
+				} else if clientType == domain.ClientTypeOpenAI {
+					// TODO: Implement OpenAI streaming transformation
+					continue
 				} else {
+					// Gemini native
 					output = unwrappedLine
 				}
 
@@ -645,85 +668,4 @@ func (a *AntigravityAdapter) handleResourceExhausted(ctx context.Context, body [
 
 	// Found quota reset timestamp, set cooldown until that time
 	cooldown.Default().SetCooldown(provider.ID, resetTime)
-}
-
-// cleanCacheControlFromRequest removes cache_control fields from Claude request
-// (like Antigravity-Manager's clean_cache_control_from_messages)
-//
-// VS Code and other clients send back historical messages with cache_control,
-// which the API rejects with "Extra inputs are not permitted" errors.
-// This must be done BEFORE any transformation to ensure complete cleanup.
-func cleanCacheControlFromRequest(requestBody []byte) []byte {
-	var req map[string]interface{}
-	if err := json.Unmarshal(requestBody, &req); err != nil {
-		return requestBody
-	}
-
-	modified := false
-
-	// Clean messages array
-	if messages, ok := req["messages"].([]interface{}); ok {
-		for _, msg := range messages {
-			msgMap, ok := msg.(map[string]interface{})
-			if !ok {
-				continue
-			}
-
-			// Clean content array
-			if content, ok := msgMap["content"].([]interface{}); ok {
-				for _, block := range content {
-					blockMap, ok := block.(map[string]interface{})
-					if !ok {
-						continue
-					}
-
-					// Remove cache_control from any content block
-					if _, hasCacheControl := blockMap["cache_control"]; hasCacheControl {
-						delete(blockMap, "cache_control")
-						modified = true
-					}
-				}
-			}
-		}
-	}
-
-	// Clean system prompt
-	if system, ok := req["system"].([]interface{}); ok {
-		for _, block := range system {
-			blockMap, ok := block.(map[string]interface{})
-			if !ok {
-				continue
-			}
-
-			if _, hasCacheControl := blockMap["cache_control"]; hasCacheControl {
-				delete(blockMap, "cache_control")
-				modified = true
-			}
-		}
-	}
-
-	// Clean tools
-	if tools, ok := req["tools"].([]interface{}); ok {
-		for _, tool := range tools {
-			toolMap, ok := tool.(map[string]interface{})
-			if !ok {
-				continue
-			}
-
-			if _, hasCacheControl := toolMap["cache_control"]; hasCacheControl {
-				delete(toolMap, "cache_control")
-				modified = true
-			}
-		}
-	}
-
-	if !modified {
-		return requestBody
-	}
-
-	result, err := json.Marshal(req)
-	if err != nil {
-		return requestBody
-	}
-	return result
 }
