@@ -43,7 +43,8 @@ func (d *DB) migrate() error {
 		type TEXT NOT NULL,
 		name TEXT NOT NULL,
 		config TEXT,
-		supported_client_types TEXT
+		supported_client_types TEXT,
+		deleted_at DATETIME
 	);
 
 	CREATE TABLE IF NOT EXISTS projects (
@@ -120,7 +121,12 @@ func (d *DB) migrate() error {
 		output_token_count INTEGER DEFAULT 0,
 		cache_read_count INTEGER DEFAULT 0,
 		cache_write_count INTEGER DEFAULT 0,
-		cost INTEGER DEFAULT 0
+		cache_5m_write_count INTEGER DEFAULT 0,
+		cache_1h_write_count INTEGER DEFAULT 0,
+		cost INTEGER DEFAULT 0,
+		route_id INTEGER DEFAULT 0,
+		provider_id INTEGER DEFAULT 0,
+		is_stream INTEGER DEFAULT 0
 	);
 
 	CREATE TABLE IF NOT EXISTS proxy_upstream_attempts (
@@ -137,7 +143,10 @@ func (d *DB) migrate() error {
 		output_token_count INTEGER DEFAULT 0,
 		cache_read_count INTEGER DEFAULT 0,
 		cache_write_count INTEGER DEFAULT 0,
-		cost INTEGER DEFAULT 0
+		cache_5m_write_count INTEGER DEFAULT 0,
+		cache_1h_write_count INTEGER DEFAULT 0,
+		cost INTEGER DEFAULT 0,
+		is_stream INTEGER DEFAULT 0
 	);
 
 	CREATE TABLE IF NOT EXISTS system_settings (
@@ -150,52 +159,27 @@ func (d *DB) migrate() error {
 	CREATE INDEX IF NOT EXISTS idx_sessions_session_id ON sessions(session_id);
 	CREATE INDEX IF NOT EXISTS idx_routes_project_client ON routes(project_id, client_type);
 	CREATE INDEX IF NOT EXISTS idx_proxy_requests_session ON proxy_requests(session_id);
+
+	CREATE TABLE IF NOT EXISTS antigravity_quotas (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		email TEXT NOT NULL UNIQUE,
+		subscription_tier TEXT DEFAULT 'FREE',
+		is_forbidden INTEGER DEFAULT 0,
+		models TEXT,
+		last_updated INTEGER DEFAULT 0,
+		name TEXT DEFAULT '',
+		picture TEXT DEFAULT '',
+		project_id TEXT DEFAULT ''
+	);
+	CREATE UNIQUE INDEX IF NOT EXISTS idx_antigravity_quotas_email ON antigravity_quotas(email);
 	`
 
 	_, err := d.db.Exec(schema)
 	if err != nil {
 		return err
 	}
-
-	// Migration: add instance_id column if not exists
-	d.db.Exec("ALTER TABLE proxy_requests ADD COLUMN instance_id TEXT")
-
-	// Migration: add cache TTL columns for detailed cache tracking
-	d.db.Exec("ALTER TABLE proxy_requests ADD COLUMN cache_5m_write_count INTEGER DEFAULT 0")
-	d.db.Exec("ALTER TABLE proxy_requests ADD COLUMN cache_1h_write_count INTEGER DEFAULT 0")
-	d.db.Exec("ALTER TABLE proxy_upstream_attempts ADD COLUMN cache_5m_write_count INTEGER DEFAULT 0")
-	d.db.Exec("ALTER TABLE proxy_upstream_attempts ADD COLUMN cache_1h_write_count INTEGER DEFAULT 0")
-
-	// Migration: add route_id and provider_id columns to proxy_requests for real-time tracking
-	d.db.Exec("ALTER TABLE proxy_requests ADD COLUMN route_id INTEGER DEFAULT 0")
-	d.db.Exec("ALTER TABLE proxy_requests ADD COLUMN provider_id INTEGER DEFAULT 0")
-
-	// Migration: add deleted_at column to providers for soft delete
-	d.db.Exec("ALTER TABLE providers ADD COLUMN deleted_at DATETIME")
-
-	// Migration: add is_stream column to track SSE requests
-	d.db.Exec("ALTER TABLE proxy_requests ADD COLUMN is_stream INTEGER DEFAULT 0")
-	d.db.Exec("ALTER TABLE proxy_upstream_attempts ADD COLUMN is_stream INTEGER DEFAULT 0")
-
-	// Migration: add antigravity_quotas table for quota storage by email
-	d.db.Exec(`
-		CREATE TABLE IF NOT EXISTS antigravity_quotas (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-			email TEXT NOT NULL UNIQUE,
-			subscription_tier TEXT DEFAULT 'FREE',
-			is_forbidden INTEGER DEFAULT 0,
-			models TEXT,
-			last_updated INTEGER DEFAULT 0
-		)
-	`)
-	d.db.Exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_antigravity_quotas_email ON antigravity_quotas(email)")
-
-	// Migration: add user info columns to antigravity_quotas
-	d.db.Exec("ALTER TABLE antigravity_quotas ADD COLUMN name TEXT DEFAULT ''")
-	d.db.Exec("ALTER TABLE antigravity_quotas ADD COLUMN picture TEXT DEFAULT ''")
-	d.db.Exec("ALTER TABLE antigravity_quotas ADD COLUMN project_id TEXT DEFAULT ''")
 
 	return nil
 }

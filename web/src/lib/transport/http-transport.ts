@@ -29,6 +29,7 @@ import type {
   AntigravityTokenValidationResult,
   AntigravityBatchValidationResult,
   AntigravityQuotaData,
+  ImportResult,
 } from './types';
 
 export class HttpTransport implements Transport {
@@ -79,6 +80,16 @@ export class HttpTransport implements Transport {
 
   async deleteProvider(id: number): Promise<void> {
     await this.client.delete(`/providers/${id}`);
+  }
+
+  async exportProviders(): Promise<Provider[]> {
+    const { data } = await this.client.get<Provider[]>('/providers/export');
+    return data ?? [];
+  }
+
+  async importProviders(providers: Provider[]): Promise<ImportResult> {
+    const { data } = await this.client.post<ImportResult>('/providers/import', providers);
+    return data;
   }
 
   // ===== Project API =====

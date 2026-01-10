@@ -1,11 +1,13 @@
-import { useState, useMemo } from 'react';
-import { Plus, Layers, Wand2, Server } from 'lucide-react';
+import { useState, useMemo, useRef } from 'react';
+import { Plus, Layers, Wand2, Server, Download, Upload } from 'lucide-react';
 import { useProviders, useAllProviderStats } from '@/hooks/queries';
 import { useStreamingRequests } from '@/hooks/use-streaming';
-import type { Provider } from '@/lib/transport';
+import type { Provider, ImportResult } from '@/lib/transport';
+import { getTransport } from '@/lib/transport';
 import { ProviderRow } from './components/provider-row';
 import { ProviderCreateFlow } from './components/provider-create-flow';
 import { ProviderEditFlow } from './components/provider-edit-flow';
+import { useQueryClient } from '@tanstack/react-query';
 
 export function ProvidersPage() {
   const { data: providers, isLoading } = useProviders();
@@ -13,6 +15,9 @@ export function ProvidersPage() {
   const { countsByProvider } = useStreamingRequests();
   const [showCreateFlow, setShowCreateFlow] = useState(false);
   const [editingProvider, setEditingProvider] = useState<Provider | null>(null);
+  const [importStatus, setImportStatus] = useState<ImportResult | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const queryClient = useQueryClient();
 
   const groupedProviders = useMemo(() => {
     const antigravity: Provider[] = [];
@@ -28,6 +33,51 @@ export function ProvidersPage() {
 
     return { antigravity, custom };
   }, [providers]);
+
+  // Export providers as JSON file
+  const handleExport = async () => {
+    try {
+      const transport = getTransport();
+      const data = await transport.exportProviders();
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `providers-${new Date().toISOString().split('T')[0]}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Export failed:', error);
+    }
+  };
+
+  // Import providers from JSON file
+  const handleImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text) as Provider[];
+      const transport = getTransport();
+      const result = await transport.importProviders(data);
+      setImportStatus(result);
+      queryClient.invalidateQueries({ queryKey: ['providers'] });
+      queryClient.invalidateQueries({ queryKey: ['routes'] });
+      // Clear file input
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+      // Auto-hide status after 5 seconds
+      setTimeout(() => setImportStatus(null), 5000);
+    } catch (error) {
+      console.error('Import failed:', error);
+      setImportStatus({ imported: 0, skipped: 0, errors: [`Import failed: ${error}`] });
+      setTimeout(() => setImportStatus(null), 5000);
+    }
+  };
 
   // Show edit flow
   if (editingProvider) {
@@ -52,10 +102,36 @@ export function ProvidersPage() {
             <p className="text-xs text-text-secondary">{providers?.length || 0} configured</p>
           </div>
         </div>
-        <button onClick={() => setShowCreateFlow(true)} className="btn btn-primary flex items-center gap-2">
-          <Plus size={14} />
-          <span>Add Provider</span>
-        </button>
+        <div className="flex items-center gap-2">
+          <input
+            type="file"
+            ref={fileInputRef}
+            onChange={handleImport}
+            accept=".json"
+            className="hidden"
+          />
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            className="btn btn-secondary flex items-center gap-2"
+            title="Import Providers"
+          >
+            <Upload size={14} />
+            <span>Import</span>
+          </button>
+          <button
+            onClick={handleExport}
+            className="btn btn-secondary flex items-center gap-2"
+            disabled={!providers?.length}
+            title="Export Providers"
+          >
+            <Download size={14} />
+            <span>Export</span>
+          </button>
+          <button onClick={() => setShowCreateFlow(true)} className="btn btn-primary flex items-center gap-2">
+            <Plus size={14} />
+            <span>Add Provider</span>
+          </button>
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto p-6">

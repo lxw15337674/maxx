@@ -26,6 +26,7 @@ import type {
   AntigravityTokenValidationResult,
   AntigravityBatchValidationResult,
   AntigravityQuotaData,
+  ImportResult,
 } from './types';
 
 /**
@@ -38,6 +39,8 @@ export interface Transport {
   createProvider(data: CreateProviderData): Promise<Provider>;
   updateProvider(id: number, data: Partial<Provider>): Promise<Provider>;
   deleteProvider(id: number): Promise<void>;
+  exportProviders(): Promise<Provider[]>;
+  importProviders(providers: Provider[]): Promise<ImportResult>;
 
   // ===== Project API =====
   getProjects(): Promise<Project[]>;

@@ -68,6 +68,17 @@ func (h *AdminHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // Provider handlers
 func (h *AdminHandler) handleProviders(w http.ResponseWriter, r *http.Request, id uint64) {
+	// Check for special endpoints
+	path := r.URL.Path
+	if strings.HasSuffix(path, "/export") {
+		h.handleProvidersExport(w, r)
+		return
+	}
+	if strings.HasSuffix(path, "/import") {
+		h.handleProvidersImport(w, r)
+		return
+	}
+
 	switch r.Method {
 	case http.MethodGet:
 		if id > 0 {
@@ -135,6 +146,47 @@ func (h *AdminHandler) handleProviders(w http.ResponseWriter, r *http.Request, i
 	default:
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
 	}
+}
+
+// handleProvidersExport exports all providers as JSON
+func (h *AdminHandler) handleProvidersExport(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+
+	providers, err := h.svc.ExportProviders()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	// Set headers for file download
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Disposition", "attachment; filename=providers.json")
+	json.NewEncoder(w).Encode(providers)
+}
+
+// handleProvidersImport imports providers from JSON
+func (h *AdminHandler) handleProvidersImport(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+
+	var providers []*domain.Provider
+	if err := json.NewDecoder(r.Body).Decode(&providers); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON: " + err.Error()})
+		return
+	}
+
+	result, err := h.svc.ImportProviders(providers)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, result)
 }
 
 // Route handlers

@@ -270,3 +270,11 @@ export interface AntigravityBatchValidationResult {
 
 export type EventCallback<T = unknown> = (data: T) => void;
 export type UnsubscribeFn = () => void;
+
+// ===== Import Result =====
+
+export interface ImportResult {
+  imported: number;
+  skipped: number;
+  errors: string[];
+}

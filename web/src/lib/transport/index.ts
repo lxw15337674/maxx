@@ -43,6 +43,8 @@ export type {
   AntigravityQuotaData,
   AntigravityTokenValidationResult,
   AntigravityBatchValidationResult,
+  // Import
+  ImportResult,
 } from './types';
 
 export type {

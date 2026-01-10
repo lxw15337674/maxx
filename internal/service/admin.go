@@ -124,6 +124,68 @@ func (s *AdminService) DeleteProvider(id uint64) error {
 	return s.providerRepo.Delete(id)
 }
 
+// ExportProviders exports all providers for backup/transfer
+// Returns providers without ID and timestamps for clean import
+func (s *AdminService) ExportProviders() ([]*domain.Provider, error) {
+	providers, err := s.providerRepo.List()
+	if err != nil {
+		return nil, err
+	}
+	// Return as-is, the handler will handle JSON serialization
+	return providers, nil
+}
+
+// ImportProviders imports providers from exported data
+// Creates new providers, skipping duplicates by name
+func (s *AdminService) ImportProviders(providers []*domain.Provider) (*ImportResult, error) {
+	result := &ImportResult{
+		Imported: 0,
+		Skipped:  0,
+		Errors:   []string{},
+	}
+
+	// Get existing providers for duplicate detection
+	existing, err := s.providerRepo.List()
+	if err != nil {
+		return nil, err
+	}
+	existingNames := make(map[string]bool)
+	for _, p := range existing {
+		existingNames[p.Name] = true
+	}
+
+	for _, provider := range providers {
+		// Skip if name already exists
+		if existingNames[provider.Name] {
+			result.Skipped++
+			result.Errors = append(result.Errors, "skipped duplicate: "+provider.Name)
+			continue
+		}
+
+		// Reset ID and timestamps for new creation
+		provider.ID = 0
+		provider.DeletedAt = nil
+
+		// Create the provider
+		if err := s.CreateProvider(provider); err != nil {
+			result.Errors = append(result.Errors, "failed to import "+provider.Name+": "+err.Error())
+			continue
+		}
+
+		result.Imported++
+		existingNames[provider.Name] = true
+	}
+
+	return result, nil
+}
+
+// ImportResult holds the result of an import operation
+type ImportResult struct {
+	Imported int      `json:"imported"`
+	Skipped  int      `json:"skipped"`
+	Errors   []string `json:"errors"`
+}
+
 // ===== Route API =====
 
 func (s *AdminService) GetRoutes() ([]*domain.Route, error) {
