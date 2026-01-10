@@ -1,6 +1,7 @@
 package antigravity
 
 import (
+	"log"
 	"strings"
 )
 
@@ -42,6 +43,9 @@ func buildTools(claudeReq *ClaudeRequest) interface{} {
 	}
 
 	// 3. Build tools object
+	// [CRITICAL FIX] Gemini v1internal does NOT allow mixing functionDeclarations and googleSearch
+	// in the same tool object. Must choose one or the other.
+	// Reference: Antigravity-Manager lines 906-921
 	if len(functionDeclarations) == 0 && !hasWebSearch {
 		return nil
 	}
@@ -49,11 +53,18 @@ func buildTools(claudeReq *ClaudeRequest) interface{} {
 	toolObj := make(map[string]interface{})
 
 	if len(functionDeclarations) > 0 {
+		// If we have client-side tools, ONLY use functionDeclarations
+		// Skip googleSearch injection to avoid 400 error
 		toolObj["functionDeclarations"] = functionDeclarations
-	}
 
-	// Inject googleSearch if detected
-	if hasWebSearch {
+		if hasWebSearch {
+			// Log that we're skipping googleSearch due to existing function declarations
+			// Gemini v1internal does not support mixed tool types
+			log.Printf("[Antigravity] Skipping googleSearch injection due to %d existing function declarations. "+
+				"Gemini v1internal does not support mixed tool types.", len(functionDeclarations))
+		}
+	} else if hasWebSearch {
+		// Only inject googleSearch when there are NO client-side tools
 		toolObj["googleSearch"] = map[string]interface{}{}
 	}
 

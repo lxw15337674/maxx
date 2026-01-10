@@ -146,10 +146,19 @@ func processToolUseBlock(
 	lastThoughtSignature *string,
 	signatureCache *SignatureCache,
 ) map[string]interface{} {
+	// Clean args to remove JSON Schema fields that Gemini doesn't support
+	// Reference: Antigravity-Manager's clean_json_schema call after building functionCall
+	var cleanedArgs map[string]interface{}
+	if block.Input != nil {
+		// Deep copy to avoid modifying original
+		cleanedArgs = deepCopyMapForArgs(block.Input)
+		CleanJSONSchema(cleanedArgs)
+	}
+
 	part := map[string]interface{}{
 		"functionCall": map[string]interface{}{
 			"name": block.Name,
-			"args": block.Input,
+			"args": cleanedArgs,
 			"id":   block.ID,
 		},
 	}
@@ -304,4 +313,48 @@ func mergeAdjacentRoles(contents []map[string]interface{}) []map[string]interfac
 	}
 
 	return merged
+}
+
+// deepCopyMapForArgs creates a deep copy of a map for args cleaning
+func deepCopyMapForArgs(src map[string]interface{}) map[string]interface{} {
+	if src == nil {
+		return nil
+	}
+
+	dst := make(map[string]interface{}, len(src))
+
+	for key, value := range src {
+		switch v := value.(type) {
+		case map[string]interface{}:
+			dst[key] = deepCopyMapForArgs(v)
+		case []interface{}:
+			dst[key] = deepCopySliceForArgs(v)
+		default:
+			dst[key] = v
+		}
+	}
+
+	return dst
+}
+
+// deepCopySliceForArgs creates a deep copy of a slice for args cleaning
+func deepCopySliceForArgs(src []interface{}) []interface{} {
+	if src == nil {
+		return nil
+	}
+
+	dst := make([]interface{}, len(src))
+
+	for i, value := range src {
+		switch v := value.(type) {
+		case map[string]interface{}:
+			dst[i] = deepCopyMapForArgs(v)
+		case []interface{}:
+			dst[i] = deepCopySliceForArgs(v)
+		default:
+			dst[i] = v
+		}
+	}
+
+	return dst
 }
