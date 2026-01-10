@@ -47,6 +47,14 @@ func buildSystemInstruction(claudeReq *ClaudeRequest, modelName string) map[stri
 		}
 	}
 
+	// 4. Add end marker (if we injected Antigravity identity)
+	// Reference: Antigravity-Manager line 488-491
+	if !userHasAntigravity {
+		parts = append(parts, map[string]interface{}{
+			"text": "\n--- [SYSTEM_PROMPT_END] ---",
+		})
+	}
+
 	if len(parts) == 0 {
 		return nil
 	}
