@@ -198,12 +198,19 @@ func (s *ClaudeStreamingState) emitMessageStart(chunk *GeminiStreamChunk) []byte
 		usage["cache_creation_input_tokens"] = 0
 	}
 
+	// [Aligned with Antigravity-Manager] Use upstream modelVersion for transparency
+	// This shows the actual model that processed the request (Gemini model)
+	modelName := s.modelVersion
+	if modelName == "" {
+		modelName = s.requestModel // Fallback to request model if upstream doesn't provide version
+	}
+
 	message := map[string]interface{}{
 		"id":            s.responseID,
 		"type":          "message",
 		"role":          "assistant",
 		"content":       []interface{}{},
-		"model":         s.requestModel, // Return original Claude model, not Gemini model
+		"model":         modelName, // Use upstream model version (like Antigravity-Manager)
 		"stop_reason":   nil,
 		"stop_sequence": nil,
 		"usage":         usage,

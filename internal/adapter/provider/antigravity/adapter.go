@@ -900,12 +900,18 @@ func convertGeminiToClaudeResponse(geminiBody []byte, requestModel string) ([]by
 		return nil, err
 	}
 
+	// [Aligned with Antigravity-Manager] Use upstream modelVersion for transparency
+	modelName := geminiResp.ModelVersion
+	if modelName == "" {
+		modelName = requestModel // Fallback to request model if upstream doesn't provide version
+	}
+
 	// Build Claude response
 	claudeResp := map[string]interface{}{
 		"id":            geminiResp.ResponseID,
 		"type":          "message",
 		"role":          "assistant",
-		"model":         requestModel, // Return original Claude model, not Gemini model
+		"model":         modelName, // Use upstream model version (like Antigravity-Manager)
 		"stop_reason":   "end_turn",
 		"stop_sequence": nil,
 	}
