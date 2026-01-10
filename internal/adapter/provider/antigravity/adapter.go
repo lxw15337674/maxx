@@ -61,9 +61,14 @@ func (a *AntigravityAdapter) Execute(ctx context.Context, w http.ResponseWriter,
 
 	// [Model Mapping] Apply Antigravity model mapping (like Antigravity-Manager)
 	// Only map if route didn't provide a mapping (mappedModel empty or same as request)
+	config := provider.Config.Antigravity
 	if mappedModel == "" || mappedModel == requestModel {
-		// Route didn't provide mapping, use our internal mapping
-		mappedModel = MapClaudeModelToGemini(requestModel)
+		// Route didn't provide mapping, use our internal mapping with haikuTarget config
+		haikuTarget := ""
+		if config != nil {
+			haikuTarget = config.HaikuTarget
+		}
+		mappedModel = MapClaudeModelToGeminiWithConfig(requestModel, haikuTarget)
 	}
 	// If route provided a different mappedModel, trust it and don't re-map
 	// (user/route has explicitly configured the target model)
@@ -106,7 +111,6 @@ func (a *AntigravityAdapter) Execute(ctx context.Context, w http.ResponseWriter,
 	}
 
 	// Wrap request in v1internal format
-	config := provider.Config.Antigravity
 	upstreamBody, err := wrapV1InternalRequest(geminiBody, config.ProjectID, requestModel, mappedModel, sessionID)
 	if err != nil {
 		return domain.NewProxyErrorWithMessage(domain.ErrFormatConversion, true, "failed to wrap request for v1internal")

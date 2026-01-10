@@ -41,6 +41,10 @@ type ProviderConfigAntigravity struct {
 
 	// Model 映射: RequestModel → MappedModel
 	ModelMapping map[string]string `json:"modelMapping,omitempty"`
+
+	// Haiku 模型映射目标 (默认 "gemini-2.5-flash-lite" 省钱，可选 "claude-sonnet-4-5" 更强)
+	// 空值使用默认 gemini-2.5-flash-lite
+	HaikuTarget string `json:"haikuTarget,omitempty"`
 }
 
 type ProviderConfig struct {
@@ -292,6 +296,44 @@ type SystemSetting struct {
 const (
 	SettingKeyProxyPort = "proxy_port" // 代理服务器端口，默认 9880
 )
+
+// Antigravity 模型配额
+type AntigravityModelQuota struct {
+	Name       string `json:"name"`       // 模型名称
+	Percentage int    `json:"percentage"` // 剩余配额百分比 0-100
+	ResetTime  string `json:"resetTime"`  // 重置时间 ISO8601
+}
+
+// Antigravity 账户配额（基于邮箱存储）
+type AntigravityQuota struct {
+	ID        uint64    `json:"id"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+
+	// 邮箱作为唯一标识
+	Email string `json:"email"`
+
+	// 用户名
+	Name string `json:"name"`
+
+	// 头像 URL
+	Picture string `json:"picture"`
+
+	// Google Cloud Project ID
+	ProjectID string `json:"projectID"`
+
+	// 订阅等级：FREE, PRO, ULTRA
+	SubscriptionTier string `json:"subscriptionTier"`
+
+	// 是否被禁止访问 (403)
+	IsForbidden bool `json:"isForbidden"`
+
+	// 各模型配额
+	Models []AntigravityModelQuota `json:"models"`
+
+	// 上次更新时间（Unix timestamp）
+	LastUpdated int64 `json:"lastUpdated"`
+}
 
 // Provider 统计信息
 type ProviderStats struct {

@@ -33,21 +33,30 @@ type GeminiInlineData struct {
 type GeminiFunctionCall struct {
 	Name string                 `json:"name"`
 	Args map[string]interface{} `json:"args"`
+	ID   string                 `json:"id,omitempty"` // Required for v1internal
 }
 
 type GeminiFunctionResponse struct {
 	Name     string      `json:"name"`
 	Response interface{} `json:"response"`
+	ID       string      `json:"id,omitempty"` // Required for v1internal
 }
 
 type GeminiGenerationConfig struct {
-	Temperature      *float64 `json:"temperature,omitempty"`
-	TopP             *float64 `json:"topP,omitempty"`
-	TopK             *int     `json:"topK,omitempty"`
-	MaxOutputTokens  int      `json:"maxOutputTokens,omitempty"`
-	StopSequences    []string `json:"stopSequences,omitempty"`
-	CandidateCount   int      `json:"candidateCount,omitempty"`
-	ResponseMimeType string   `json:"responseMimeType,omitempty"`
+	Temperature      *float64              `json:"temperature,omitempty"`
+	TopP             *float64              `json:"topP,omitempty"`
+	TopK             *int                  `json:"topK,omitempty"`
+	MaxOutputTokens  int                   `json:"maxOutputTokens,omitempty"`
+	StopSequences    []string              `json:"stopSequences,omitempty"`
+	CandidateCount   int                   `json:"candidateCount,omitempty"`
+	ResponseMimeType string                `json:"responseMimeType,omitempty"`
+	ThinkingConfig   *GeminiThinkingConfig `json:"thinkingConfig,omitempty"`
+	EffortLevel      string                `json:"effortLevel,omitempty"` // Claude API v2.0.67+ effort mapping
+}
+
+type GeminiThinkingConfig struct {
+	IncludeThoughts bool `json:"includeThoughts,omitempty"`
+	ThinkingBudget  int  `json:"thinkingBudget,omitempty"`
 }
 
 type GeminiSafetySetting struct {
@@ -57,6 +66,8 @@ type GeminiSafetySetting struct {
 
 type GeminiTool struct {
 	FunctionDeclarations []GeminiFunctionDecl `json:"functionDeclarations,omitempty"`
+	GoogleSearch         *struct{}            `json:"googleSearch,omitempty"`
+	GoogleSearchRetrieval *struct{}           `json:"googleSearchRetrieval,omitempty"`
 }
 
 type GeminiFunctionDecl struct {

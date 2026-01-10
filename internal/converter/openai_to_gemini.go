@@ -51,7 +51,9 @@ func (c *openaiToGeminiRequest) Transform(body []byte, model string, stream bool
 				systemText = content
 			}
 			if systemText != "" {
+				// [FIX] Set role to "user" for systemInstruction (like CLIProxyAPI)
 				geminiReq.SystemInstruction = &GeminiContent{
+					Role:  "user",
 					Parts: []GeminiPart{{Text: systemText}},
 				}
 			}

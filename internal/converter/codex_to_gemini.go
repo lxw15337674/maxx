@@ -31,7 +31,9 @@ func (c *codexToGeminiRequest) Transform(body []byte, model string, stream bool)
 
 	// Convert instructions to system instruction
 	if req.Instructions != "" {
+		// [FIX] Set role to "user" for systemInstruction (like CLIProxyAPI)
 		geminiReq.SystemInstruction = &GeminiContent{
+			Role:  "user",
 			Parts: []GeminiPart{{Text: req.Instructions}},
 		}
 	}

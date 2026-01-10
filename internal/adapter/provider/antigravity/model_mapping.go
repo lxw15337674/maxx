@@ -16,10 +16,11 @@ var claudeToGeminiMap = map[string]string{
 	"claude-opus-4":              "claude-opus-4-5-thinking",
 	"claude-opus-4-5-20251101":   "claude-opus-4-5-thinking",
 
-	// Haiku 映射 (like Antigravity-Manager: Haiku -> claude-sonnet-4-5)
-	"claude-haiku-4":            "claude-sonnet-4-5",
-	"claude-3-haiku-20240307":   "claude-sonnet-4-5",
-	"claude-haiku-4-5-20251001": "claude-sonnet-4-5",
+	// Haiku 映射: 默认使用 gemini-2.5-flash-lite (省钱)
+	// 可通过 Provider 配置 haikuTarget 覆盖为 "claude-sonnet-4-5" (更强)
+	"claude-haiku-4":            "gemini-2.5-flash-lite",
+	"claude-3-haiku-20240307":   "gemini-2.5-flash-lite",
+	"claude-haiku-4-5-20251001": "gemini-2.5-flash-lite",
 
 	// OpenAI 协议映射表
 	"gpt-4":               "gemini-2.5-pro",
@@ -55,22 +56,39 @@ var claudeToGeminiMap = map[string]string{
 // MapClaudeModelToGemini maps Claude model names to Gemini model names
 // (like Antigravity-Manager's map_claude_model_to_gemini)
 func MapClaudeModelToGemini(input string) string {
+	return MapClaudeModelToGeminiWithConfig(input, "")
+}
+
+// MapClaudeModelToGeminiWithConfig maps Claude model names with optional haikuTarget override
+// haikuTarget: "" = use default (gemini-2.5-flash-lite), "claude-sonnet-4-5" = stronger model
+func MapClaudeModelToGeminiWithConfig(input string, haikuTarget string) string {
 	// Strip -online suffix for mapping lookup (will be re-added by resolveRequestConfig)
 	cleanInput := strings.TrimSuffix(input, "-online")
 
-	// 1. Check exact match in map
+	// 1. Check if this is a Haiku model and apply haikuTarget override
+	if haikuTarget != "" && isHaikuModel(cleanInput) {
+		return haikuTarget
+	}
+
+	// 2. Check exact match in map
 	if mapped, ok := claudeToGeminiMap[cleanInput]; ok {
 		return mapped
 	}
 
-	// 2. Pass-through known prefixes (gemini-, -thinking) to support dynamic suffixes
+	// 3. Pass-through known prefixes (gemini-, -thinking) to support dynamic suffixes
 	// (like Antigravity-Manager)
 	if strings.HasPrefix(cleanInput, "gemini-") || strings.Contains(cleanInput, "thinking") {
 		return cleanInput
 	}
 
-	// 3. Fallback to default
+	// 4. Fallback to default
 	return "claude-sonnet-4-5"
+}
+
+// isHaikuModel checks if the model name is a Haiku variant
+func isHaikuModel(model string) bool {
+	modelLower := strings.ToLower(model)
+	return strings.Contains(modelLower, "haiku")
 }
 
 // ShouldEnableThinkingByDefault checks if thinking mode should be enabled by default
