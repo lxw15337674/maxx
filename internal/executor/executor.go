@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/Bowl42/maxx-next/internal/cooldown"
 	ctxutil "github.com/Bowl42/maxx-next/internal/context"
 	"github.com/Bowl42/maxx-next/internal/domain"
 	"github.com/Bowl42/maxx-next/internal/event"
@@ -222,6 +223,10 @@ func (e *Executor) Execute(ctx context.Context, w http.ResponseWriter, req *http
 				}
 				currentAttempt = nil // Clear so defer doesn't update
 
+				// Reset failure counts on success
+				clientType := string(ctxutil.GetClientType(attemptCtx))
+				cooldown.Default().RecordSuccess(matchedRoute.Provider.ID, clientType)
+
 				proxyReq.Status = "COMPLETED"
 				proxyReq.EndTime = time.Now()
 				proxyReq.Duration = proxyReq.EndTime.Sub(proxyReq.StartTime)
@@ -313,6 +318,10 @@ func (e *Executor) Execute(ctx context.Context, w http.ResponseWriter, req *http
 				log.Printf("[Executor] Error is not ProxyError (type=%T), moving to next route", err)
 				break // Move to next route
 			}
+
+			// Handle cooldown (unified cooldown logic for all providers)
+			e.handleCooldown(attemptCtx, proxyErr, matchedRoute.Provider)
+
 			if !proxyErr.Retryable {
 				log.Printf("[Executor] Error is not retryable, moving to next route")
 				break // Move to next route
@@ -436,3 +445,109 @@ func flattenHeaders(h http.Header) map[string]string {
 	}
 	return result
 }
+
+// handleCooldown processes cooldown information from ProxyError and sets provider cooldown
+// Priority: 1) Explicit time from API, 2) Policy-based calculation based on failure reason
+func (e *Executor) handleCooldown(ctx context.Context, proxyErr *domain.ProxyError, provider *domain.Provider) {
+	// Determine which client type to apply cooldown to
+	clientType := proxyErr.CooldownClientType
+	if proxyErr.RateLimitInfo != nil && proxyErr.RateLimitInfo.ClientType != "" {
+		clientType = proxyErr.RateLimitInfo.ClientType
+	}
+	// Fallback to current request's clientType if not specified
+	if clientType == "" {
+		clientType = string(ctxutil.GetClientType(ctx))
+	}
+
+	// Determine cooldown reason and explicit time
+	var reason cooldown.CooldownReason
+	var explicitUntil *time.Time
+
+	// Priority 1: Check for explicit cooldown time from API
+	if proxyErr.CooldownUntil != nil {
+		// Has explicit time from API (e.g., from CooldownUntil field)
+		explicitUntil = proxyErr.CooldownUntil
+		reason = cooldown.ReasonQuotaExhausted // Default, may be overridden below
+		if proxyErr.RateLimitInfo != nil {
+			reason = mapRateLimitTypeToReason(proxyErr.RateLimitInfo.Type)
+		}
+	} else if proxyErr.RateLimitInfo != nil && !proxyErr.RateLimitInfo.QuotaResetTime.IsZero() {
+		// Has explicit quota reset time from API
+		explicitUntil = &proxyErr.RateLimitInfo.QuotaResetTime
+		reason = mapRateLimitTypeToReason(proxyErr.RateLimitInfo.Type)
+	} else if proxyErr.RetryAfter > 0 {
+		// Has Retry-After duration from API
+		untilTime := time.Now().Add(proxyErr.RetryAfter)
+		explicitUntil = &untilTime
+		reason = cooldown.ReasonRateLimit
+	} else if proxyErr.IsServerError {
+		// Server error (5xx) - no explicit time, use policy
+		reason = cooldown.ReasonServerError
+		explicitUntil = nil
+	} else if proxyErr.IsNetworkError {
+		// Network error - no explicit time, use policy
+		reason = cooldown.ReasonNetworkError
+		explicitUntil = nil
+	} else {
+		// Unknown error type - use policy
+		reason = cooldown.ReasonUnknown
+		explicitUntil = nil
+	}
+
+	// Record failure and apply cooldown
+	// If explicitUntil is not nil, it will be used directly
+	// Otherwise, cooldown duration is calculated based on policy and failure count
+	until := cooldown.Default().RecordFailure(provider.ID, clientType, reason, explicitUntil)
+
+	// If there's an async update channel, listen for updates
+	if proxyErr.CooldownUpdateChan != nil {
+		go e.handleAsyncCooldownUpdate(proxyErr.CooldownUpdateChan, provider, clientType, reason)
+	}
+
+	clientTypeDesc := clientType
+	if clientTypeDesc == "" {
+		clientTypeDesc = "all types"
+	}
+
+	explicitStr := "policy-based"
+	if explicitUntil != nil {
+		explicitStr = "explicit from API"
+	}
+
+	log.Printf("[Executor] Provider %d (%s): Cooldown until %s for clientType=%s (reason=%s, source=%s)",
+		provider.ID, provider.Name, until.Format("2006-01-02 15:04:05"), clientTypeDesc, reason, explicitStr)
+}
+
+// mapRateLimitTypeToReason maps RateLimitInfo.Type to CooldownReason
+func mapRateLimitTypeToReason(rateLimitType string) cooldown.CooldownReason {
+	switch rateLimitType {
+	case "quota_exhausted":
+		return cooldown.ReasonQuotaExhausted
+	case "rate_limit_exceeded":
+		return cooldown.ReasonRateLimit
+	case "concurrent_limit":
+		return cooldown.ReasonConcurrentLimit
+	default:
+		return cooldown.ReasonRateLimit // Default to rate limit
+	}
+}
+
+// handleAsyncCooldownUpdate listens for async cooldown updates from providers
+func (e *Executor) handleAsyncCooldownUpdate(updateChan chan time.Time, provider *domain.Provider, clientType string, reason cooldown.CooldownReason) {
+	select {
+	case newCooldownTime := <-updateChan:
+		if !newCooldownTime.IsZero() {
+			cooldown.Default().UpdateCooldown(provider.ID, clientType, newCooldownTime)
+			clientTypeDesc := clientType
+			if clientTypeDesc == "" {
+				clientTypeDesc = "all types"
+			}
+			log.Printf("[Executor] Provider %d (%s): Updated cooldown to %s for clientType=%s (async update, reason=%s)",
+				provider.ID, provider.Name, newCooldownTime.Format("2006-01-02 15:04:05"), clientTypeDesc, reason)
+		}
+	case <-time.After(15 * time.Second):
+		// Timeout waiting for update
+		log.Printf("[Executor] Provider %d (%s): Async cooldown update timed out", provider.ID, provider.Name)
+	}
+}
+

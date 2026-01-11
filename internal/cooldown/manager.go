@@ -1,21 +1,30 @@
 package cooldown
 
 import (
+	"log"
 	"sync"
 	"time"
+
+	"github.com/Bowl42/maxx-next/internal/domain"
+	"github.com/Bowl42/maxx-next/internal/repository"
 )
 
 // Manager manages provider cooldown states
-// Cooldown is stored in memory and will be reset on restart
+// Cooldown is stored in memory and persisted to database
 type Manager struct {
-	mu        sync.RWMutex
-	cooldowns map[uint64]time.Time // providerID -> cooldown end time
+	mu             sync.RWMutex
+	cooldowns      map[CooldownKey]time.Time         // cooldown key -> end time
+	failureTracker *FailureTracker                   // tracks failure counts
+	policies       map[CooldownReason]CooldownPolicy // cooldown calculation strategies
+	repository     repository.CooldownRepository
 }
 
 // NewManager creates a new cooldown manager
 func NewManager() *Manager {
 	return &Manager{
-		cooldowns: make(map[uint64]time.Time),
+		cooldowns:      make(map[CooldownKey]time.Time),
+		failureTracker: NewFailureTracker(),
+		policies:       DefaultPolicies(),
 	}
 }
 
@@ -27,99 +36,298 @@ func Default() *Manager {
 	return defaultManager
 }
 
-// SetCooldown sets the cooldown end time for a provider
-func (m *Manager) SetCooldown(providerID uint64, until time.Time) {
+// SetRepository sets the repository for cooldown persistence
+func (m *Manager) SetRepository(repo repository.CooldownRepository) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.cooldowns[providerID] = until
+	m.repository = repo
 }
 
-// SetCooldownDuration sets a cooldown for a provider with a duration from now
-func (m *Manager) SetCooldownDuration(providerID uint64, duration time.Duration) {
-	m.SetCooldown(providerID, time.Now().Add(duration))
-}
-
-// ClearCooldown removes the cooldown for a provider
-func (m *Manager) ClearCooldown(providerID uint64) {
+// SetFailureCountRepository sets the repository for failure count persistence
+func (m *Manager) SetFailureCountRepository(repo repository.FailureCountRepository) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	delete(m.cooldowns, providerID)
+	m.failureTracker.SetRepository(repo)
 }
 
-// IsInCooldown checks if a provider is currently in cooldown
-func (m *Manager) IsInCooldown(providerID uint64) bool {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
+// LoadFromDatabase loads all active cooldowns and failure counts from database into memory
+func (m *Manager) LoadFromDatabase() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
-	until, ok := m.cooldowns[providerID]
-	if !ok {
-		return false
+	// Load cooldowns
+	if m.repository != nil {
+		cooldowns, err := m.repository.GetAll()
+		if err != nil {
+			return err
+		}
+
+		m.cooldowns = make(map[CooldownKey]time.Time)
+		for _, cd := range cooldowns {
+			key := CooldownKey{
+				ProviderID: cd.ProviderID,
+				ClientType: cd.ClientType,
+			}
+			m.cooldowns[key] = cd.UntilTime
+		}
+
+		log.Printf("[Cooldown] Loaded %d cooldowns from database", len(cooldowns))
 	}
 
-	// If cooldown has expired, it's not in cooldown
-	return time.Now().Before(until)
+	// Load failure counts
+	if err := m.failureTracker.LoadFromDatabase(); err != nil {
+		log.Printf("[Cooldown] Warning: Failed to load failure counts: %v", err)
+	}
+
+	return nil
 }
 
-// GetCooldownUntil returns the cooldown end time for a provider
-// Returns zero time if not in cooldown
-func (m *Manager) GetCooldownUntil(providerID uint64) time.Time {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
+// RecordFailure records a failure and applies cooldown based on the reason and policy
+// If explicitUntil is provided, it will be used directly (e.g., from Retry-After header)
+// Otherwise, the cooldown duration is calculated using the policy for the given reason
+// Returns the calculated cooldown end time
+func (m *Manager) RecordFailure(providerID uint64, clientType string, reason CooldownReason, explicitUntil *time.Time) time.Time {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
-	until, ok := m.cooldowns[providerID]
+	// If explicit until time is provided (e.g., from 429 Retry-After), use it directly
+	if explicitUntil != nil {
+		m.setCooldownLocked(providerID, clientType, *explicitUntil)
+		log.Printf("[Cooldown] Provider %d (clientType=%s): Set explicit cooldown until %s (reason=%s)",
+			providerID, clientType, explicitUntil.Format("2006-01-02 15:04:05"), reason)
+		return *explicitUntil
+	}
+
+	// Otherwise, calculate cooldown based on policy and failure count
+	// Increment failure count
+	failureCount := m.failureTracker.IncrementFailure(providerID, clientType, reason)
+
+	// Get policy for this reason
+	policy, ok := m.policies[reason]
 	if !ok {
-		return time.Time{}
+		// Fallback to fixed 1-minute cooldown if no policy found
+		policy = &FixedDurationPolicy{Duration: 1 * time.Minute}
+		log.Printf("[Cooldown] Warning: No policy found for reason=%s, using default 1-minute cooldown", reason)
 	}
 
-	// If cooldown has expired, return zero time
-	if time.Now().After(until) {
-		return time.Time{}
-	}
+	// Calculate cooldown duration
+	duration := policy.CalculateCooldown(failureCount)
+	until := time.Now().Add(duration)
+
+	m.setCooldownLocked(providerID, clientType, until)
+
+	log.Printf("[Cooldown] Provider %d (clientType=%s): Set cooldown for %v until %s (reason=%s, failureCount=%d)",
+		providerID, clientType, duration, until.Format("2006-01-02 15:04:05"), reason, failureCount)
 
 	return until
 }
 
-// GetAllCooldowns returns all active cooldowns (providerID -> end time)
-func (m *Manager) GetAllCooldowns() map[uint64]time.Time {
+// UpdateCooldown updates cooldown time without incrementing failure count
+// This is used for async updates (e.g., when quota reset time is fetched asynchronously)
+func (m *Manager) UpdateCooldown(providerID uint64, clientType string, until time.Time) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.setCooldownLocked(providerID, clientType, until)
+	log.Printf("[Cooldown] Provider %d (clientType=%s): Updated cooldown to %s (async update, no count increment)",
+		providerID, clientType, until.Format("2006-01-02 15:04:05"))
+}
+
+// RecordSuccess records a successful request and resets all failure counts for this provider+clientType
+// This ensures cooldown policies start fresh after a successful request
+func (m *Manager) RecordSuccess(providerID uint64, clientType string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.failureTracker.ResetFailures(providerID, clientType)
+}
+
+// setCooldownLocked sets cooldown without acquiring lock (internal use only)
+func (m *Manager) setCooldownLocked(providerID uint64, clientType string, until time.Time) {
+	key := CooldownKey{ProviderID: providerID, ClientType: clientType}
+	m.cooldowns[key] = until
+
+	// Persist to database
+	if m.repository != nil {
+		cd := &domain.Cooldown{
+			ProviderID: providerID,
+			ClientType: clientType,
+			UntilTime:  until,
+		}
+		if err := m.repository.Upsert(cd); err != nil {
+			log.Printf("[Cooldown] Failed to persist cooldown for provider %d: %v", providerID, err)
+		}
+	}
+}
+
+// SetCooldownDuration sets a cooldown for a provider with a duration from now
+// clientType is optional - empty string means cooldown applies to all client types
+func (m *Manager) SetCooldownDuration(providerID uint64, clientType string, duration time.Duration) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	until := time.Now().Add(duration)
+	m.setCooldownLocked(providerID, clientType, until)
+}
+
+// ClearCooldown removes the cooldown for a provider
+// If clientType is empty, clears ALL cooldowns for the provider (both global and specific)
+// If clientType is specified, only clears that specific cooldown
+func (m *Manager) ClearCooldown(providerID uint64, clientType string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if clientType == "" {
+		// Clear all cooldowns for this provider
+		keysToDelete := []CooldownKey{}
+		for key := range m.cooldowns {
+			if key.ProviderID == providerID {
+				keysToDelete = append(keysToDelete, key)
+			}
+		}
+		for _, key := range keysToDelete {
+			delete(m.cooldowns, key)
+		}
+
+		// Delete from database
+		if m.repository != nil {
+			if err := m.repository.DeleteAll(providerID); err != nil {
+				log.Printf("[Cooldown] Failed to delete all cooldowns for provider %d from database: %v", providerID, err)
+			}
+		}
+
+		// Also reset all failure counts for this provider
+		m.failureTracker.ResetFailures(providerID, "")
+	} else {
+		// Clear specific cooldown
+		key := CooldownKey{ProviderID: providerID, ClientType: clientType}
+		delete(m.cooldowns, key)
+
+		// Delete from database
+		if m.repository != nil {
+			if err := m.repository.Delete(providerID, clientType); err != nil {
+				log.Printf("[Cooldown] Failed to delete cooldown for provider %d, client %s from database: %v", providerID, clientType, err)
+			}
+		}
+
+		// Also reset failure counts for this provider+clientType
+		m.failureTracker.ResetFailures(providerID, clientType)
+	}
+}
+
+// IsInCooldown checks if a provider is currently in cooldown for a specific client type
+// Checks both:
+// 1. Global cooldown (clientType = "")
+// 2. Client-type-specific cooldown
+func (m *Manager) IsInCooldown(providerID uint64, clientType string) bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
 	now := time.Now()
-	result := make(map[uint64]time.Time)
 
-	for id, until := range m.cooldowns {
+	// Check global cooldown (applies to all client types)
+	globalKey := CooldownKey{ProviderID: providerID, ClientType: ""}
+	if until, ok := m.cooldowns[globalKey]; ok && now.Before(until) {
+		return true
+	}
+
+	// Check client-type-specific cooldown
+	if clientType != "" {
+		specificKey := CooldownKey{ProviderID: providerID, ClientType: clientType}
+		if until, ok := m.cooldowns[specificKey]; ok && now.Before(until) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// GetCooldownUntil returns the cooldown end time for a provider and client type
+// Returns the later of global cooldown or client-type-specific cooldown
+// Returns zero time if not in cooldown
+func (m *Manager) GetCooldownUntil(providerID uint64, clientType string) time.Time {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	now := time.Now()
+	var latestCooldown time.Time
+
+	// Check global cooldown
+	globalKey := CooldownKey{ProviderID: providerID, ClientType: ""}
+	if until, ok := m.cooldowns[globalKey]; ok && now.Before(until) {
+		latestCooldown = until
+	}
+
+	// Check client-type-specific cooldown
+	if clientType != "" {
+		specificKey := CooldownKey{ProviderID: providerID, ClientType: clientType}
+		if until, ok := m.cooldowns[specificKey]; ok && now.Before(until) {
+			if until.After(latestCooldown) {
+				latestCooldown = until
+			}
+		}
+	}
+
+	return latestCooldown
+}
+
+// GetAllCooldowns returns all active cooldowns
+// Returns map of CooldownKey -> end time
+func (m *Manager) GetAllCooldowns() map[CooldownKey]time.Time {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	now := time.Now()
+	result := make(map[CooldownKey]time.Time)
+
+	for key, until := range m.cooldowns {
 		if now.Before(until) {
-			result[id] = until
+			result[key] = until
 		}
 	}
 
 	return result
 }
 
-// CleanupExpired removes expired cooldowns from memory
+// CleanupExpired removes expired cooldowns from memory and database
+// Also resets failure counts for expired cooldowns
 func (m *Manager) CleanupExpired() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	now := time.Now()
-	for id, until := range m.cooldowns {
+	expiredKeys := []CooldownKey{}
+
+	for key, until := range m.cooldowns {
 		if now.After(until) {
-			delete(m.cooldowns, id)
+			delete(m.cooldowns, key)
+			expiredKeys = append(expiredKeys, key)
 		}
+	}
+
+	// Reset failure counts for expired cooldowns
+	for _, key := range expiredKeys {
+		m.failureTracker.ResetFailures(key.ProviderID, key.ClientType)
+	}
+
+	// Delete expired cooldowns from database
+	if m.repository != nil {
+		if err := m.repository.DeleteExpired(); err != nil {
+			log.Printf("[Cooldown] Failed to delete expired cooldowns from database: %v", err)
+		}
+	}
+
+	// Cleanup old failure counts (older than 24 hours)
+	m.failureTracker.CleanupExpired(24 * 60 * 60)
+
+	if len(expiredKeys) > 0 {
+		log.Printf("[Cooldown] Cleaned up %d expired cooldowns and reset their failure counts", len(expiredKeys))
 	}
 }
 
-// CooldownInfo represents cooldown information for API response
-type CooldownInfo struct {
-	ProviderID   uint64    `json:"providerID"`
-	ProviderName string    `json:"providerName,omitempty"`
-	Until        time.Time `json:"until"`
-	Remaining    string    `json:"remaining"` // Human readable remaining time
-}
-
-// GetCooldownInfo returns cooldown info for a specific provider
-func (m *Manager) GetCooldownInfo(providerID uint64, providerName string) *CooldownInfo {
-	until := m.GetCooldownUntil(providerID)
+// GetCooldownInfo returns cooldown info for a specific provider and client type
+func (m *Manager) GetCooldownInfo(providerID uint64, clientType string, providerName string) *CooldownInfo {
+	until := m.GetCooldownUntil(providerID, clientType)
 	if until.IsZero() {
 		return nil
 	}
@@ -132,6 +340,7 @@ func (m *Manager) GetCooldownInfo(providerID uint64, providerName string) *Coold
 	return &CooldownInfo{
 		ProviderID:   providerID,
 		ProviderName: providerName,
+		ClientType:   clientType,
 		Until:        until,
 		Remaining:    formatDuration(remaining),
 	}
@@ -139,21 +348,42 @@ func (m *Manager) GetCooldownInfo(providerID uint64, providerName string) *Coold
 
 // formatDuration formats a duration as a human-readable string
 func formatDuration(d time.Duration) string {
-	if d < time.Minute {
-		return d.Round(time.Second).String()
+	d = d.Round(time.Second)
+	h := d / time.Hour
+	d -= h * time.Hour
+	m := d / time.Minute
+	d -= m * time.Minute
+	s := d / time.Second
+
+	if h > 0 {
+		return formatWithUnits(int(h), "h", int(m), "m", int(s), "s")
 	}
-	if d < time.Hour {
-		minutes := int(d.Minutes())
-		seconds := int(d.Seconds()) % 60
-		if seconds > 0 {
-			return (time.Duration(minutes)*time.Minute + time.Duration(seconds)*time.Second).String()
+	if m > 0 {
+		return formatWithUnits(int(m), "m", int(s), "s", 0, "")
+	}
+	return formatWithUnits(int(s), "s", 0, "", 0, "")
+}
+
+func formatWithUnits(val1 int, unit1 string, val2 int, unit2 string, val3 int, unit3 string) string {
+	result := ""
+	if val1 > 0 {
+		result += formatInt(val1) + unit1
+	}
+	if val2 > 0 {
+		if result != "" {
+			result += " "
 		}
-		return (time.Duration(minutes) * time.Minute).String()
+		result += formatInt(val2) + unit2
 	}
-	hours := int(d.Hours())
-	minutes := int(d.Minutes()) % 60
-	if minutes > 0 {
-		return (time.Duration(hours)*time.Hour + time.Duration(minutes)*time.Minute).String()
+	if val3 > 0 && unit3 != "" {
+		if result != "" {
+			result += " "
+		}
+		result += formatInt(val3) + unit3
 	}
-	return (time.Duration(hours) * time.Hour).String()
+	return result
+}
+
+func formatInt(i int) string {
+	return string(rune('0' + i/10)) + string(rune('0' + i%10))
 }

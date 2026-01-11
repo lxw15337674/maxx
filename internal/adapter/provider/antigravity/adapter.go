@@ -15,7 +15,6 @@ import (
 
 	"github.com/Bowl42/maxx-next/internal/adapter/provider"
 	ctxutil "github.com/Bowl42/maxx-next/internal/context"
-	"github.com/Bowl42/maxx-next/internal/cooldown"
 	"github.com/Bowl42/maxx-next/internal/domain"
 	"github.com/Bowl42/maxx-next/internal/usage"
 )
@@ -188,7 +187,9 @@ func (a *AntigravityAdapter) Execute(ctx context.Context, w http.ResponseWriter,
 				if hasNextEndpoint(idx, len(baseURLs)) {
 					continue
 				}
-				return domain.NewProxyErrorWithMessage(domain.ErrUpstreamError, true, "failed to connect to upstream")
+				proxyErr := domain.NewProxyErrorWithMessage(domain.ErrUpstreamError, true, "failed to connect to upstream")
+				proxyErr.IsNetworkError = true // Mark as network error (connection timeout, DNS failure, etc.)
+				return proxyErr
 			}
 			defer resp.Body.Close()
 
@@ -218,7 +219,9 @@ func (a *AntigravityAdapter) Execute(ctx context.Context, w http.ResponseWriter,
 					if hasNextEndpoint(idx, len(baseURLs)) {
 						continue
 					}
-					return domain.NewProxyErrorWithMessage(domain.ErrUpstreamError, true, "failed to connect to upstream after token refresh")
+					proxyErr := domain.NewProxyErrorWithMessage(domain.ErrUpstreamError, true, "failed to connect to upstream after token refresh")
+					proxyErr.IsNetworkError = true // Mark as network error
+					return proxyErr
 				}
 				defer resp.Body.Close()
 			}
@@ -235,9 +238,11 @@ func (a *AntigravityAdapter) Execute(ctx context.Context, w http.ResponseWriter,
 					}
 				}
 
-				// Check for RESOURCE_EXHAUSTED (429) and handle cooldown
+				// Check for RESOURCE_EXHAUSTED (429) and extract cooldown info
+				var rateLimitInfo *domain.RateLimitInfo
+				var cooldownUpdateChan chan time.Time
 				if resp.StatusCode == http.StatusTooManyRequests {
-					a.handleResourceExhausted(ctx, body, provider)
+					rateLimitInfo, cooldownUpdateChan = a.parseRateLimitInfo(ctx, body, provider)
 				}
 
 				// Parse retry info for 429/5xx responses (like Antigravity-Manager)
@@ -273,9 +278,19 @@ func (a *AntigravityAdapter) Execute(ctx context.Context, w http.ResponseWriter,
 					fmt.Sprintf("upstream returned status %d", resp.StatusCode),
 				)
 
+				// Set status code and check if it's a server error (5xx)
+				proxyErr.HTTPStatusCode = resp.StatusCode
+				proxyErr.IsServerError = resp.StatusCode >= 500 && resp.StatusCode < 600
+
 				// Set retry info on error for upstream handling
 				if retryAfter > 0 {
 					proxyErr.RetryAfter = retryAfter
+				}
+
+				// Set rate limit info for cooldown handling
+				if rateLimitInfo != nil {
+					proxyErr.RateLimitInfo = rateLimitInfo
+					proxyErr.CooldownUpdateChan = cooldownUpdateChan
 				}
 
 				lastErr = proxyErr
@@ -838,9 +853,9 @@ func (a *AntigravityAdapter) handleCollectedStreamResponse(ctx context.Context, 
 	return nil
 }
 
-// handleResourceExhausted handles 429 RESOURCE_EXHAUSTED errors with QUOTA_EXHAUSTED reason
-// Only triggers cooldown when the error contains quotaResetTimeStamp in details
-func (a *AntigravityAdapter) handleResourceExhausted(ctx context.Context, body []byte, provider *domain.Provider) {
+// parseRateLimitInfo parses 429 RESOURCE_EXHAUSTED errors and extracts cooldown information
+// Returns RateLimitInfo and optional channel for async cooldown updates
+func (a *AntigravityAdapter) parseRateLimitInfo(ctx context.Context, body []byte, provider *domain.Provider) (*domain.RateLimitInfo, chan time.Time) {
 	// Parse error response to check if it's QUOTA_EXHAUSTED with reset timestamp
 	var errResp struct {
 		Error struct {
@@ -860,13 +875,13 @@ func (a *AntigravityAdapter) handleResourceExhausted(ctx context.Context, body [
 	}
 
 	if err := json.Unmarshal(body, &errResp); err != nil {
-		// Can't parse error, don't set cooldown
-		return
+		// Can't parse error, return nil
+		return nil, nil
 	}
 
 	// Check if it's RESOURCE_EXHAUSTED
 	if errResp.Error.Status != "RESOURCE_EXHAUSTED" {
-		return
+		return nil, nil
 	}
 
 	// Look for QUOTA_EXHAUSTED with quotaResetTimeStamp in details
@@ -881,53 +896,79 @@ func (a *AntigravityAdapter) handleResourceExhausted(ctx context.Context, body [
 		}
 	}
 
-	if resetTime.IsZero() {
-		// No quota reset timestamp found, query quota API
-		config := provider.Config.Antigravity
-		if config == nil {
+	if !resetTime.IsZero() {
+		// Found quota reset timestamp, return immediately
+		return &domain.RateLimitInfo{
+			Type:             "quota_exhausted",
+			QuotaResetTime:   resetTime,
+			RetryHintMessage: errResp.Error.Message,
+			ClientType:       "", // Antigravity quota is global, affects all client types
+		}, nil
+	}
+
+	// No quota reset timestamp found, query quota API asynchronously
+	config := provider.Config.Antigravity
+	if config == nil {
+		// No config, return default 1-minute cooldown
+		oneMinuteFromNow := time.Now().Add(time.Minute)
+		return &domain.RateLimitInfo{
+			Type:             "quota_exhausted",
+			QuotaResetTime:   oneMinuteFromNow,
+			RetryHintMessage: errResp.Error.Message,
+			ClientType:       "",
+		}, nil
+	}
+
+	// Create channel for async update
+	updateChan := make(chan time.Time, 1)
+
+	// Fetch quota in background
+	go func() {
+		defer close(updateChan)
+
+		quotaCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		quota, err := FetchQuotaForProvider(quotaCtx, config.RefreshToken, config.ProjectID)
+		if err != nil {
+			// Failed to fetch quota, send 1-minute cooldown
+			updateChan <- time.Now().Add(time.Minute)
 			return
 		}
 
-		// Fetch quota in background to not block the response
-		go func() {
-			quotaCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			defer cancel()
+		// Check if any model has 0% quota
+		var earliestReset time.Time
+		hasZeroQuota := false
 
-			quota, err := FetchQuotaForProvider(quotaCtx, config.RefreshToken, config.ProjectID)
-			if err != nil {
-				// Failed to fetch quota, apply short cooldown
-				cooldown.Default().SetCooldownDuration(provider.ID, time.Minute)
-				return
-			}
-
-			// Check if any model has 0% quota
-			var earliestReset time.Time
-			hasZeroQuota := false
-
-			for _, model := range quota.Models {
-				if model.Percentage == 0 && model.ResetTime != "" {
-					hasZeroQuota = true
-					rt, err := time.Parse(time.RFC3339, model.ResetTime)
-					if err != nil {
-						continue
-					}
-					if earliestReset.IsZero() || rt.Before(earliestReset) {
-						earliestReset = rt
-					}
+		for _, model := range quota.Models {
+			if model.Percentage == 0 && model.ResetTime != "" {
+				hasZeroQuota = true
+				rt, err := time.Parse(time.RFC3339, model.ResetTime)
+				if err != nil {
+					continue
+				}
+				if earliestReset.IsZero() || rt.Before(earliestReset) {
+					earliestReset = rt
 				}
 			}
+		}
 
-			if hasZeroQuota && !earliestReset.IsZero() {
-				// Quota is 0, cooldown until reset time
-				cooldown.Default().SetCooldown(provider.ID, earliestReset)
-			} else {
-				// Quota is not 0, apply short cooldown (1 minute)
-				cooldown.Default().SetCooldownDuration(provider.ID, time.Minute)
-			}
-		}()
-		return
-	}
+		if hasZeroQuota && !earliestReset.IsZero() {
+			// Quota is 0, send cooldown until reset time
+			updateChan <- earliestReset
+		} else {
+			// Quota is not 0, send 1-minute cooldown
+			updateChan <- time.Now().Add(time.Minute)
+		}
+	}()
 
-	// Found quota reset timestamp, set cooldown until that time
-	cooldown.Default().SetCooldown(provider.ID, resetTime)
+	// Return initial 1-minute cooldown with async update channel
+	oneMinuteFromNow := time.Now().Add(time.Minute)
+	return &domain.RateLimitInfo{
+		Type:             "quota_exhausted",
+		QuotaResetTime:   oneMinuteFromNow,
+		RetryHintMessage: errResp.Error.Message,
+		ClientType:       "", // Global cooldown
+	}, updateChan
 }
+

@@ -30,6 +30,7 @@ import type {
   AntigravityBatchValidationResult,
   AntigravityQuotaData,
   ImportResult,
+  Cooldown,
 } from './types';
 
 export class HttpTransport implements Transport {
@@ -303,6 +304,17 @@ export class HttpTransport implements Transport {
       { params }
     );
     return data;
+  }
+
+  // ===== Cooldown API =====
+
+  async getCooldowns(): Promise<Cooldown[]> {
+    const { data } = await this.client.get<Cooldown[]>('/cooldowns');
+    return data ?? [];
+  }
+
+  async clearCooldown(providerId: number): Promise<void> {
+    await this.client.delete(`/cooldowns/${providerId}`);
   }
 
   // ===== WebSocket 订阅 =====

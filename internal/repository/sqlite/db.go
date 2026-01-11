@@ -160,6 +160,30 @@ func (d *DB) migrate() error {
 	CREATE INDEX IF NOT EXISTS idx_routes_project_client ON routes(project_id, client_type);
 	CREATE INDEX IF NOT EXISTS idx_proxy_requests_session ON proxy_requests(session_id);
 
+	CREATE TABLE IF NOT EXISTS cooldowns (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		provider_id INTEGER NOT NULL,
+		client_type TEXT NOT NULL DEFAULT '',
+		until_time DATETIME NOT NULL
+	);
+	CREATE UNIQUE INDEX IF NOT EXISTS idx_cooldowns_provider_client ON cooldowns(provider_id, client_type);
+	CREATE INDEX IF NOT EXISTS idx_cooldowns_until ON cooldowns(until_time);
+
+	CREATE TABLE IF NOT EXISTS failure_counts (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		provider_id INTEGER NOT NULL,
+		client_type TEXT NOT NULL DEFAULT '',
+		reason TEXT NOT NULL,
+		count INTEGER DEFAULT 0,
+		last_failure_at DATETIME NOT NULL
+	);
+	CREATE UNIQUE INDEX IF NOT EXISTS idx_failure_counts_provider_client_reason ON failure_counts(provider_id, client_type, reason);
+	CREATE INDEX IF NOT EXISTS idx_failure_counts_last_failure ON failure_counts(last_failure_at);
+
 	CREATE TABLE IF NOT EXISTS antigravity_quotas (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -206,6 +230,23 @@ func parseTime(t sql.NullTime) time.Time {
 		return t.Time
 	}
 	return time.Time{}
+}
+
+// parseTime parses a string timestamp into time.Time
+func parseTimeString(s string) (time.Time, error) {
+	if s == "" {
+		return time.Time{}, nil
+	}
+	// SQLite stores timestamps in RFC3339 format
+	return time.Parse("2006-01-02 15:04:05", s)
+}
+
+// formatTime formats a time.Time into a string for SQLite
+func formatTime(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.UTC().Format("2006-01-02 15:04:05")
 }
 
 func nullTime(t time.Time) sql.NullTime {

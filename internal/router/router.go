@@ -181,10 +181,10 @@ func (r *Router) Match(clientType domain.ClientType, projectID uint64) ([]*Match
 		}
 
 		// Skip providers in cooldown
-		if r.cooldownManager.IsInCooldown(route.ProviderID) {
-			until := r.cooldownManager.GetCooldownUntil(route.ProviderID)
-			log.Printf("[Router] Provider %d (%s) is in cooldown until %s, skipping",
-				route.ProviderID, provider.Name, until.Format("15:04:05"))
+		if r.cooldownManager.IsInCooldown(route.ProviderID, string(clientType)) {
+			until := r.cooldownManager.GetCooldownUntil(route.ProviderID, string(clientType))
+			log.Printf("[Router] Provider %d (%s) is in cooldown for clientType=%s until %s, skipping",
+				route.ProviderID, provider.Name, clientType, until.Format("15:04:05"))
 			continue
 		}
 

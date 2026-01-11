@@ -8,7 +8,9 @@ import (
 	"io"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Bowl42/maxx-next/internal/adapter/provider"
 	"github.com/Bowl42/maxx-next/internal/converter"
@@ -126,7 +128,9 @@ func (a *CustomAdapter) Execute(ctx context.Context, w http.ResponseWriter, req 
 	client := &http.Client{}
 	resp, err := client.Do(upstreamReq)
 	if err != nil {
-		return domain.NewProxyErrorWithMessage(domain.ErrUpstreamError, true, "failed to connect to upstream")
+		proxyErr := domain.NewProxyErrorWithMessage(domain.ErrUpstreamError, true, "failed to connect to upstream")
+		proxyErr.IsNetworkError = true // Mark as network error (connection timeout, DNS failure, etc.)
+		return proxyErr
 	}
 	defer resp.Body.Close()
 
@@ -141,11 +145,26 @@ func (a *CustomAdapter) Execute(ctx context.Context, w http.ResponseWriter, req 
 				Body:    string(body),
 			}
 		}
-		return domain.NewProxyErrorWithMessage(
+
+		proxyErr := domain.NewProxyErrorWithMessage(
 			fmt.Errorf("upstream error: %s", string(body)),
 			isRetryableStatusCode(resp.StatusCode),
 			fmt.Sprintf("upstream returned status %d", resp.StatusCode),
 		)
+
+		// Set status code and check if it's a server error (5xx)
+		proxyErr.HTTPStatusCode = resp.StatusCode
+		proxyErr.IsServerError = resp.StatusCode >= 500 && resp.StatusCode < 600
+
+		// Parse rate limit info for 429 errors
+		if resp.StatusCode == http.StatusTooManyRequests {
+			rateLimitInfo := parseRateLimitInfo(resp, body, clientType)
+			if rateLimitInfo != nil {
+				proxyErr.RateLimitInfo = rateLimitInfo
+			}
+		}
+
+		return proxyErr
 	}
 
 	// Handle response
@@ -593,3 +612,104 @@ func copyResponseHeaders(dst, src http.Header) {
 		}
 	}
 }
+
+// parseRateLimitInfo parses rate limit information from 429 responses
+// Supports multiple API formats: OpenAI, Anthropic, Gemini, etc.
+func parseRateLimitInfo(resp *http.Response, body []byte, clientType domain.ClientType) *domain.RateLimitInfo {
+	var resetTime time.Time
+	var rateLimitType string = "rate_limit_exceeded"
+
+	// Method 1: Parse Retry-After header
+	if retryAfter := resp.Header.Get("Retry-After"); retryAfter != "" {
+		// Try as seconds
+		if seconds, err := strconv.Atoi(retryAfter); err == nil && seconds > 0 {
+			resetTime = time.Now().Add(time.Duration(seconds) * time.Second)
+		} else if t, err := http.ParseTime(retryAfter); err == nil {
+			resetTime = t
+		}
+	}
+
+	// Method 2: Parse response body
+	bodyStr := string(body)
+	bodyLower := strings.ToLower(bodyStr)
+
+	// Detect rate limit type from message
+	if strings.Contains(bodyLower, "quota") || strings.Contains(bodyLower, "exceeded your") {
+		rateLimitType = "quota_exhausted"
+	} else if strings.Contains(bodyLower, "per minute") || strings.Contains(bodyLower, "rpm") || strings.Contains(bodyLower, "tpm") {
+		rateLimitType = "rate_limit_exceeded"
+	} else if strings.Contains(bodyLower, "concurrent") {
+		rateLimitType = "concurrent_limit"
+	}
+
+	// Try to parse structured error response
+	var errResp struct {
+		Error struct {
+			Message string `json:"message"`
+			Type    string `json:"type"`
+			Code    string `json:"code"`
+		} `json:"error"`
+	}
+
+	if json.Unmarshal(body, &errResp) == nil {
+		// OpenAI/Anthropic style
+		if errResp.Error.Type == "rate_limit_error" || errResp.Error.Code == "rate_limit_exceeded" {
+			// Try to extract time from message
+			if t := extractTimeFromMessage(errResp.Error.Message); !t.IsZero() {
+				resetTime = t
+			}
+		}
+		if errResp.Error.Type == "insufficient_quota" || errResp.Error.Code == "insufficient_quota" {
+			rateLimitType = "quota_exhausted"
+		}
+	}
+
+	// If no reset time found, use default based on type
+	if resetTime.IsZero() {
+		switch rateLimitType {
+		case "quota_exhausted":
+			// Default to 1 hour for quota exhaustion
+			resetTime = time.Now().Add(1 * time.Hour)
+		case "concurrent_limit":
+			// Short cooldown for concurrent limits
+			resetTime = time.Now().Add(10 * time.Second)
+		default:
+			// Default to 1 minute for rate limits
+			resetTime = time.Now().Add(1 * time.Minute)
+		}
+	}
+
+	return &domain.RateLimitInfo{
+		Type:             rateLimitType,
+		QuotaResetTime:   resetTime,
+		RetryHintMessage: bodyStr,
+		ClientType:       string(clientType), // Cooldown applies to specific client type
+	}
+}
+
+// extractTimeFromMessage tries to extract time duration from error message
+// Handles formats like "Try again in 20s", "in 2 minutes", "in 1 hour"
+func extractTimeFromMessage(msg string) time.Time {
+	msgLower := strings.ToLower(msg)
+
+	// Pattern: "in X seconds/minutes/hours"
+	patterns := []struct {
+		re         *regexp.Regexp
+		multiplier time.Duration
+	}{
+		{regexp.MustCompile(`in (\d+)\s*s(?:ec(?:ond)?s?)?`), time.Second},
+		{regexp.MustCompile(`in (\d+)\s*m(?:in(?:ute)?s?)?`), time.Minute},
+		{regexp.MustCompile(`in (\d+)\s*h(?:our)?s?`), time.Hour},
+	}
+
+	for _, p := range patterns {
+		if matches := p.re.FindStringSubmatch(msgLower); len(matches) > 1 {
+			if n, err := strconv.Atoi(matches[1]); err == nil {
+				return time.Now().Add(time.Duration(n) * p.multiplier)
+			}
+		}
+	}
+
+	return time.Time{}
+}
+

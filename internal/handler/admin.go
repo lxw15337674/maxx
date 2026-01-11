@@ -735,14 +735,19 @@ func (h *AdminHandler) handleCooldowns(w http.ResponseWriter, r *http.Request, p
 
 		// Build response
 		var result []map[string]interface{}
-		for id, until := range cooldowns {
+		for key, until := range cooldowns {
 			remaining := time.Until(until)
 			if remaining < 0 {
 				continue
 			}
+			clientTypeDesc := key.ClientType
+			if clientTypeDesc == "" {
+				clientTypeDesc = "all"
+			}
 			result = append(result, map[string]interface{}{
-				"providerID":   id,
-				"providerName": providerNames[id],
+				"providerID":   key.ProviderID,
+				"providerName": providerNames[key.ProviderID],
+				"clientType":   clientTypeDesc,
 				"until":        until,
 				"remaining":    remaining.Round(time.Second).String(),
 			})
@@ -755,7 +760,8 @@ func (h *AdminHandler) handleCooldowns(w http.ResponseWriter, r *http.Request, p
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "provider id required"})
 			return
 		}
-		cm.ClearCooldown(providerID)
+		// Clear all cooldowns for this provider (both global and client-type-specific)
+		cm.ClearCooldown(providerID, "")
 		writeJSON(w, http.StatusOK, map[string]string{"message": "cooldown cleared"})
 
 	default:

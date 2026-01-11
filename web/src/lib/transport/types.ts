@@ -278,3 +278,13 @@ export interface ImportResult {
   skipped: number;
   errors: string[];
 }
+
+// ===== Cooldown =====
+
+export interface Cooldown {
+  providerID: number;
+  providerName: string;
+  clientType: string; // 'all' for global cooldown, or specific client type
+  until: string; // ISO 8601 timestamp
+  remaining: string; // Human-readable duration like "15m30s"
+}

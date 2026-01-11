@@ -27,6 +27,7 @@ import type {
   AntigravityBatchValidationResult,
   AntigravityQuotaData,
   ImportResult,
+  Cooldown,
 } from './types';
 
 /**
@@ -99,6 +100,10 @@ export interface Transport {
   validateAntigravityTokens(tokens: string[]): Promise<AntigravityBatchValidationResult>;
   validateAntigravityTokenText(tokenText: string): Promise<AntigravityBatchValidationResult>;
   getAntigravityProviderQuota(providerId: number, forceRefresh?: boolean): Promise<AntigravityQuotaData>;
+
+  // ===== Cooldown API =====
+  getCooldowns(): Promise<Cooldown[]>;
+  clearCooldown(providerId: number): Promise<void>;
 
   // ===== 实时订阅 =====
   subscribe<T = unknown>(eventType: WSMessageType, callback: EventCallback<T>): UnsubscribeFn;

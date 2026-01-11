@@ -21,10 +21,25 @@ var (
 
 // ProxyError represents an error during proxy execution
 type ProxyError struct {
-    Err        error
-    Retryable  bool
-    Message    string
-    RetryAfter time.Duration // Suggested retry delay (from 429 responses)
+    Err                error
+    Retryable          bool
+    Message            string
+    RetryAfter         time.Duration // Suggested retry delay (from 429 responses)
+    CooldownUntil      *time.Time    // Absolute cooldown end time
+    CooldownClientType string        // ClientType for cooldown (empty = all client types)
+    CooldownUpdateChan chan time.Time // Channel for async cooldown updates (optional)
+    RateLimitInfo      *RateLimitInfo // Additional rate limit information
+    IsServerError      bool          // True for 5xx errors (triggers incremental cooldown)
+    IsNetworkError     bool          // True for network errors (connection timeout, DNS failure, etc.)
+    HTTPStatusCode     int           // HTTP status code (for logging and error handling)
+}
+
+// RateLimitInfo contains detailed rate limit information from providers
+type RateLimitInfo struct {
+    Type             string    // Type of rate limit: "quota_exhausted", "rate_limit_exceeded", "concurrent", etc.
+    QuotaResetTime   time.Time // When quota resets (for quota exhaustion)
+    RetryHintMessage string    // Original error message with retry hints
+    ClientType       string    // Affected client type (empty = all)
 }
 
 func (e *ProxyError) Error() string {

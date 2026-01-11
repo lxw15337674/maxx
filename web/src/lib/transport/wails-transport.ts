@@ -27,6 +27,7 @@ import type {
   AntigravityTokenValidationResult,
   AntigravityBatchValidationResult,
   AntigravityQuotaData,
+  Cooldown,
 } from './types';
 
 // Wails 事件 API 类型
@@ -249,6 +250,16 @@ export class WailsTransport implements Transport {
 
   async getAntigravityProviderQuota(providerId: number, forceRefresh?: boolean): Promise<AntigravityQuotaData> {
     return this.call<AntigravityQuotaData>('AntigravityService.GetProviderQuota', providerId, forceRefresh ?? false);
+  }
+
+  // ===== Cooldown API =====
+
+  async getCooldowns(): Promise<Cooldown[]> {
+    return this.call<Cooldown[]>('AdminService.GetCooldowns');
+  }
+
+  async clearCooldown(providerId: number): Promise<void> {
+    await this.call<void>('AdminService.ClearCooldown', providerId);
   }
 
   // ===== Wails Events 订阅 =====

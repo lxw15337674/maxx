@@ -45,6 +45,8 @@ export type {
   AntigravityBatchValidationResult,
   // Import
   ImportResult,
+  // Cooldown
+  Cooldown,
 } from './types';
 
 export type {

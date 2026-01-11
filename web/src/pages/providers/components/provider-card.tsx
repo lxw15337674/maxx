@@ -1,7 +1,8 @@
-import { Wand2, Mail, Globe, Server, ChevronRight } from 'lucide-react';
+import { Wand2, Mail, Globe, Server, ChevronRight, Snowflake, X } from 'lucide-react';
 import { ClientIcon } from '@/components/icons/client-icons';
 import type { Provider } from '@/lib/transport';
 import { ANTIGRAVITY_COLOR } from '../types';
+import { useCooldowns } from '@/hooks/use-cooldowns';
 
 interface ProviderCardProps {
   provider: Provider;
@@ -11,13 +12,37 @@ interface ProviderCardProps {
 
 export function AntigravityProviderCard({ provider, onClick, streamingCount }: ProviderCardProps) {
   const email = provider.config?.antigravity?.email || 'Unknown';
+  const { getCooldownForProvider, formatRemaining, clearCooldown, isClearingCooldown } = useCooldowns();
+  const cooldown = getCooldownForProvider(provider.id);
+
+  const handleClearCooldown = (e: React.MouseEvent) => {
+    e.stopPropagation(); // Prevent triggering card onClick
+    clearCooldown(provider.id);
+  };
 
   return (
     <div
       onClick={onClick}
-      className="bg-surface-secondary border border-border rounded-xl p-4 hover:border-accent/30 hover:bg-surface-hover cursor-pointer transition-all relative group"
+      className={`bg-surface-secondary border border-border rounded-xl p-4 hover:border-accent/30 hover:bg-surface-hover cursor-pointer transition-all relative group ${
+        cooldown ? 'opacity-60' : ''
+      }`}
     >
-      {streamingCount > 0 && (
+      {cooldown && (
+        <div className="absolute top-3 right-3 flex items-center gap-1.5 px-2 py-1 rounded-md bg-cyan-500/20 border border-cyan-500/30">
+          <Snowflake size={14} className="text-cyan-400 animate-pulse" />
+          <span className="text-xs font-medium text-cyan-300">{formatRemaining(cooldown)}</span>
+          <button
+            onClick={handleClearCooldown}
+            disabled={isClearingCooldown}
+            className="ml-1 p-0.5 rounded hover:bg-cyan-500/30 transition-colors disabled:opacity-50"
+            title="Clear cooldown"
+          >
+            <X size={12} className="text-cyan-300" />
+          </button>
+        </div>
+      )}
+
+      {!cooldown && streamingCount > 0 && (
         <div className="absolute top-3 right-3">
           <span
             className="px-1.5 py-0.5 rounded text-xs font-extrabold animate-pulse-soft shadow-md bg-gray-800 border"
@@ -30,10 +55,16 @@ export function AntigravityProviderCard({ provider, onClick, streamingCount }: P
 
       <div className="flex items-start gap-3">
         <div
-          className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0"
-          style={{ backgroundColor: `${ANTIGRAVITY_COLOR}15` }}
+          className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${
+            cooldown ? 'bg-cyan-500/10' : ''
+          }`}
+          style={cooldown ? undefined : { backgroundColor: `${ANTIGRAVITY_COLOR}15` }}
         >
-          <Wand2 size={20} style={{ color: ANTIGRAVITY_COLOR }} />
+          {cooldown ? (
+            <Snowflake size={20} className="text-cyan-400" />
+          ) : (
+            <Wand2 size={20} style={{ color: ANTIGRAVITY_COLOR }} />
+          )}
         </div>
 
         <div className="flex-1 min-w-0">
@@ -60,12 +91,15 @@ export function AntigravityProviderCard({ provider, onClick, streamingCount }: P
         </div>
       </div>
 
-      {streamingCount === 0 && <div className="absolute top-3 right-3 w-2 h-2 rounded-full bg-emerald-400" />}
+      {!cooldown && streamingCount === 0 && <div className="absolute top-3 right-3 w-2 h-2 rounded-full bg-emerald-400" />}
     </div>
   );
 }
 
 export function CustomProviderCard({ provider, onClick, streamingCount }: ProviderCardProps) {
+  const { getCooldownForProvider, formatRemaining, clearCooldown, isClearingCooldown } = useCooldowns();
+  const cooldown = getCooldownForProvider(provider.id);
+
   const getDisplayUrl = () => {
     if (provider.config?.custom?.baseURL) return provider.config.custom.baseURL;
     for (const ct of provider.supportedClientTypes || []) {
@@ -75,12 +109,34 @@ export function CustomProviderCard({ provider, onClick, streamingCount }: Provid
     return 'Not configured';
   };
 
+  const handleClearCooldown = (e: React.MouseEvent) => {
+    e.stopPropagation(); // Prevent triggering card onClick
+    clearCooldown(provider.id);
+  };
+
   return (
     <div
       onClick={onClick}
-      className="bg-surface-secondary border border-border rounded-xl p-4 hover:border-accent/30 hover:bg-surface-hover cursor-pointer transition-all relative group"
+      className={`bg-surface-secondary border border-border rounded-xl p-4 hover:border-accent/30 hover:bg-surface-hover cursor-pointer transition-all relative group ${
+        cooldown ? 'opacity-60' : ''
+      }`}
     >
-      {streamingCount > 0 && (
+      {cooldown && (
+        <div className="absolute top-3 right-3 flex items-center gap-1.5 px-2 py-1 rounded-md bg-cyan-500/20 border border-cyan-500/30">
+          <Snowflake size={14} className="text-cyan-400 animate-pulse" />
+          <span className="text-xs font-medium text-cyan-300">{formatRemaining(cooldown)}</span>
+          <button
+            onClick={handleClearCooldown}
+            disabled={isClearingCooldown}
+            className="ml-1 p-0.5 rounded hover:bg-cyan-500/30 transition-colors disabled:opacity-50"
+            title="Clear cooldown"
+          >
+            <X size={12} className="text-cyan-300" />
+          </button>
+        </div>
+      )}
+
+      {!cooldown && streamingCount > 0 && (
         <div className="absolute top-3 right-3">
           <span
             className="px-1.5 py-0.5 rounded text-xs font-extrabold animate-pulse-soft shadow-md bg-gray-800 border"
@@ -92,8 +148,14 @@ export function CustomProviderCard({ provider, onClick, streamingCount }: Provid
       )}
 
       <div className="flex items-start gap-3">
-        <div className="w-10 h-10 rounded-lg bg-surface-hover flex items-center justify-center flex-shrink-0">
-          <Server size={20} className="text-text-secondary" />
+        <div className={`w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 ${
+          cooldown ? 'bg-cyan-500/10' : 'bg-surface-hover'
+        }`}>
+          {cooldown ? (
+            <Snowflake size={20} className="text-cyan-400" />
+          ) : (
+            <Server size={20} className="text-text-secondary" />
+          )}
         </div>
 
         <div className="flex-1 min-w-0">
@@ -120,7 +182,7 @@ export function CustomProviderCard({ provider, onClick, streamingCount }: Provid
         </div>
       </div>
 
-      {streamingCount === 0 && <div className="absolute top-3 right-3 w-2 h-2 rounded-full bg-emerald-400" />}
+      {!cooldown && streamingCount === 0 && <div className="absolute top-3 right-3 w-2 h-2 rounded-full bg-emerald-400" />}
     </div>
   );
 }

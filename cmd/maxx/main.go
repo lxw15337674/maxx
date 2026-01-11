@@ -12,6 +12,7 @@ import (
 	"github.com/Bowl42/maxx-next/internal/adapter/client"
 	_ "github.com/Bowl42/maxx-next/internal/adapter/provider/antigravity" // Register antigravity adapter
 	_ "github.com/Bowl42/maxx-next/internal/adapter/provider/custom"      // Register custom adapter
+	"github.com/Bowl42/maxx-next/internal/cooldown"
 	"github.com/Bowl42/maxx-next/internal/executor"
 	"github.com/Bowl42/maxx-next/internal/handler"
 	"github.com/Bowl42/maxx-next/internal/repository/cached"
@@ -78,6 +79,15 @@ func main() {
 	attemptRepo := sqlite.NewProxyUpstreamAttemptRepository(db)
 	settingRepo := sqlite.NewSystemSettingRepository(db)
 	antigravityQuotaRepo := sqlite.NewAntigravityQuotaRepository(db)
+	cooldownRepo := sqlite.NewCooldownRepository(db)
+	failureCountRepo := sqlite.NewFailureCountRepository(db)
+
+	// Initialize cooldown manager with database persistence
+	cooldown.Default().SetRepository(cooldownRepo)
+	cooldown.Default().SetFailureCountRepository(failureCountRepo)
+	if err := cooldown.Default().LoadFromDatabase(); err != nil {
+		log.Printf("Warning: Failed to load cooldowns from database: %v", err)
+	}
 
 	// Generate instance ID and mark stale requests as failed
 	instanceID := generateInstanceID()
@@ -115,6 +125,23 @@ func main() {
 	if err := r.InitAdapters(); err != nil {
 		log.Printf("Warning: Failed to initialize adapters: %v", err)
 	}
+
+	// Start cooldown cleanup goroutine
+	go func() {
+		ticker := time.NewTicker(1 * time.Hour)
+		defer ticker.Stop()
+
+		for range ticker.C {
+			before := len(cooldown.Default().GetAllCooldowns())
+			cooldown.Default().CleanupExpired()
+			after := len(cooldown.Default().GetAllCooldowns())
+
+			if before != after {
+				log.Printf("[Cooldown] Cleanup completed: removed %d expired entries", before-after)
+			}
+		}
+	}()
+	log.Println("[Cooldown] Background cleanup started (runs every 1 hour)")
 
 	// Create WebSocket hub
 	wsHub := handler.NewWebSocketHub()
