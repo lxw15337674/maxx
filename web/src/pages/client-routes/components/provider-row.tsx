@@ -1,5 +1,4 @@
-import { GripVertical, Settings, Zap, RefreshCw, Trash2, Activity, Snowflake, X } from 'lucide-react';
-import { Switch } from '@/components/ui';
+import { GripVertical, Zap, RefreshCw, Activity, Snowflake, Info } from 'lucide-react';
 import { StreamingBadge } from '@/components/ui/streaming-badge';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
@@ -9,7 +8,7 @@ import type { ClientType, ProviderStats, AntigravityQuotaData } from '@/lib/tran
 import type { ProviderConfigItem } from '../types';
 import { useAntigravityQuota } from '@/hooks/queries';
 import { useCooldowns } from '@/hooks/use-cooldowns';
-import { CooldownDetailsDialog } from '@/components/cooldown-details-dialog';
+import { ProviderDetailsDialog } from '@/components/provider-details-dialog';
 import { useState, useEffect } from 'react';
 
 // 格式化 Token 数量
@@ -35,14 +34,6 @@ function formatCost(microUsd: number): string {
   return `$${usd.toFixed(4)}`;
 }
 
-// 计算缓存利用率: (CacheRead + CacheWrite) / (Input + Output + CacheRead + CacheWrite) × 100
-function calcCacheRate(stats: ProviderStats): number {
-  const cacheTotal = stats.totalCacheRead + stats.totalCacheWrite;
-  const total = stats.totalInputTokens + stats.totalOutputTokens + cacheTotal;
-  if (total === 0) return 0;
-  return (cacheTotal / total) * 100;
-}
-
 // Sortable Provider Row
 type SortableProviderRowProps = {
   item: ProviderConfigItem;
@@ -65,7 +56,7 @@ export function SortableProviderRow({
   onToggle,
   onDelete,
 }: SortableProviderRowProps) {
-  const [showCooldownDialog, setShowCooldownDialog] = useState(false);
+  const [showDetailsDialog, setShowDetailsDialog] = useState(false);
   const { getCooldownForProvider, clearCooldown, isClearingCooldown } = useCooldowns();
   const cooldown = getCooldownForProvider(item.provider.id, clientType);
 
@@ -85,23 +76,13 @@ export function SortableProviderRow({
   };
 
   const handleRowClick = (e: React.MouseEvent) => {
-    // 如果在 cooldown，打开弹窗
-    if (cooldown) {
-      e.stopPropagation();
-      setShowCooldownDialog(true);
-    }
+    // 所有状态都打开详情弹窗
+    e.stopPropagation();
+    setShowDetailsDialog(true);
   };
 
   const handleClearCooldown = () => {
     clearCooldown(item.provider.id);
-    setShowCooldownDialog(false);
-  };
-
-  const handleDisableRoute = () => {
-    if (item.enabled) {
-      onToggle(); // 禁用 Route
-    }
-    setShowCooldownDialog(false);
   };
 
   return (
@@ -119,23 +100,25 @@ export function SortableProviderRow({
           clientType={clientType}
           streamingCount={streamingCount}
           stats={stats}
-          isToggling={isToggling}
-          onToggle={onToggle}
-          onDelete={onDelete}
           onRowClick={handleRowClick}
           isInCooldown={!!cooldown}
         />
       </div>
 
-      {/* Cooldown Details Dialog */}
-      <CooldownDetailsDialog
+      {/* Provider Details Dialog */}
+      <ProviderDetailsDialog
+        item={item}
+        clientType={clientType}
+        open={showDetailsDialog}
+        onOpenChange={setShowDetailsDialog}
+        stats={stats}
         cooldown={cooldown || null}
-        open={showCooldownDialog}
-        onOpenChange={setShowCooldownDialog}
-        onClear={handleClearCooldown}
-        isClearing={isClearingCooldown}
-        onDisable={handleDisableRoute}
-        isDisabling={isToggling}
+        streamingCount={streamingCount}
+        onToggle={onToggle}
+        isToggling={isToggling}
+        onDelete={onDelete}
+        onClearCooldown={handleClearCooldown}
+        isClearingCooldown={isClearingCooldown}
       />
     </>
   );
@@ -148,10 +131,7 @@ type ProviderRowContentProps = {
   clientType: ClientType;
   streamingCount: number;
   stats?: ProviderStats;
-  isToggling: boolean;
   isOverlay?: boolean;
-  onToggle: () => void;
-  onDelete?: () => void;
   onRowClick?: (e: React.MouseEvent) => void;
   isInCooldown?: boolean;
 };
@@ -195,14 +175,10 @@ export function ProviderRowContent({
   clientType,
   streamingCount,
   stats,
-  isToggling,
-  isOverlay,
-  onToggle,
-  onDelete,
   onRowClick,
   isInCooldown: isInCooldownProp,
 }: ProviderRowContentProps) {
-  const { provider, enabled, route, isNative } = item;
+  const { provider, enabled, isNative } = item;
   const color = getProviderColor(provider.type);
   const isAntigravity = provider.type === 'antigravity';
 
@@ -211,7 +187,7 @@ export function ProviderRowContent({
   const claudeInfo = isAntigravity ? getClaudeQuotaInfo(quota) : null;
 
   // 获取 cooldown 状态
-  const { getCooldownForProvider, formatRemaining, clearCooldown, isClearingCooldown } = useCooldowns();
+  const { getCooldownForProvider, formatRemaining } = useCooldowns();
   const cooldown = getCooldownForProvider(provider.id, clientType);
   const isInCooldown = isInCooldownProp ?? !!cooldown;
 
@@ -236,353 +212,225 @@ export function ProviderRowContent({
     return () => clearInterval(interval);
   }, [cooldown, formatRemaining]);
 
-  const handleClearCooldown = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    clearCooldown(provider.id);
-  };
-
   const handleContentClick = (e: React.MouseEvent) => {
-    // 如果有 onRowClick 回调（在 cooldown 状态），优先使用
-    if (onRowClick && isInCooldown) {
-      onRowClick(e);
-    } else if (!isInCooldown) {
-      // 否则执行 toggle
-      onToggle();
-    }
+    // 所有状态都打开详情弹窗
+    onRowClick?.(e);
   };
 
   return (
     <div
       onClick={handleContentClick}
-      className={`
-        flex items-center gap-md p-md rounded-lg border transition-all duration-300 relative overflow-hidden group
-        ${
-          isInCooldown
-            ? 'bg-gradient-to-r from-[#e0f7fa] to-[#e1f5fe] dark:from-[#083344] dark:to-[#0c4a6e] border-cyan-200/50 dark:border-cyan-700/50 shadow-[0_0_20px_rgba(6,182,212,0.15)] cursor-pointer'
-            : enabled
-            ? streamingCount > 0
-              ? 'bg-surface-primary'
-              : 'bg-emerald-400/[0.03] border-emerald-400/30 shadow-sm cursor-pointer'
-            : 'bg-surface-secondary/50 border-dashed border-border opacity-95 cursor-pointer'
-        }
-        ${isOverlay ? 'shadow-xl ring-2 ring-accent opacity-100' : ''}
-      `}
+      className={cn(
+        "group relative flex items-center gap-4 p-3 rounded-xl border transition-all duration-300 overflow-hidden",
+        isInCooldown
+          ? "bg-gradient-to-r from-cyan-950/40 to-blue-950/40 border-cyan-500/30 shadow-[0_0_20px_rgba(6,182,212,0.1)] cursor-pointer"
+          : enabled
+          ? streamingCount > 0
+            ? "bg-surface-primary border-transparent ring-1 ring-white/10"
+            : "bg-surface-primary/60 border-border hover:border-emerald-500/30 hover:bg-surface-primary shadow-sm cursor-pointer"
+          : "bg-surface-secondary/40 border-dashed border-border opacity-70 cursor-pointer grayscale-[0.5] hover:opacity-100 hover:grayscale-0"
+      )}
       style={{
-        borderColor: isInCooldown
-          ? undefined // Handle via class
-          : enabled && streamingCount > 0 ? `${color}80` : undefined,
-        boxShadow: enabled && streamingCount > 0 ? `0 0 15px ${color}20` : undefined,
+        borderColor: !isInCooldown && enabled && streamingCount > 0 ? `${color}40` : undefined,
+        boxShadow: !isInCooldown && enabled && streamingCount > 0 ? `0 0 20px ${color}15` : undefined,
       }}
     >
       {/* Marquee 背景动画 (仅在有 streaming 请求时显示) */}
       {streamingCount > 0 && enabled && !isInCooldown && (
         <div
-          className="absolute inset-0 animate-marquee pointer-events-none opacity-60"
-          style={{ backgroundColor: `${color}25` }}
+          className="absolute inset-0 animate-marquee pointer-events-none opacity-40"
+          style={{ backgroundColor: `${color}15` }}
         />
       )}
 
       {/* Cooldown 冰冻效果 - 增强版 */}
       {isInCooldown && (
         <>
-          {/* 动态光效 (放在底层) */}
-          <div className="absolute inset-0 bg-gradient-to-br from-cyan-400/10 via-transparent to-blue-500/10 pointer-events-none animate-pulse duration-[4000ms]" />
-          {/* 顶部高光 (放在底层) */}
-          <div className="absolute inset-x-0 top-0 h-[1px] bg-gradient-to-r from-transparent via-cyan-200/40 to-transparent opacity-40" />
-
-          {/* 动态飘落雪花 (放在上层) */}
-          <div className="absolute inset-0 overflow-hidden pointer-events-none z-[5]">
-            {[
-              { left: '5%', delay: '0s', duration: '6s', size: 14 },
-              { left: '15%', delay: '1s', duration: '8s', size: 20 },
-              { left: '25%', delay: '4s', duration: '7s', size: 12 },
-              { left: '35%', delay: '2s', duration: '9s', size: 24 },
-              { left: '45%', delay: '5s', duration: '6s', size: 16 },
-              { left: '55%', delay: '0.5s', duration: '8.5s', size: 18 },
-              { left: '65%', delay: '3s', duration: '7.5s', size: 22 },
-              { left: '75%', delay: '1.5s', duration: '6.5s', size: 14 },
-              { left: '85%', delay: '4.5s', duration: '9.5s', size: 20 },
-              { left: '95%', delay: '2.5s', duration: '7s', size: 12 },
-              { left: '10%', delay: '3.5s', duration: '8s', size: 16 },
-              { left: '80%', delay: '0.8s', duration: '6.8s', size: 18 },
-            ].map((flake, i) => (
-              <div
+          <div className="absolute inset-0 bg-gradient-to-br from-cyan-500/5 via-transparent to-blue-600/5 pointer-events-none animate-pulse" />
+          <div className="absolute inset-x-0 top-0 h-[1px] bg-gradient-to-r from-transparent via-cyan-400/20 to-transparent" />
+          {/* 雪花动画 */}
+          <div className="absolute inset-0 overflow-hidden pointer-events-none">
+            {[...Array(6)].map((_, i) => (
+              <Snowflake
                 key={i}
-                className="absolute -top-6 animate-snowfall text-cyan-400/70 dark:text-cyan-200/70"
+                size={12}
+                className="absolute -top-4 text-cyan-500/20 animate-snowfall"
                 style={{
-                  left: flake.left,
-                  animationDelay: flake.delay,
-                  animationDuration: flake.duration,
+                  left: `${Math.random() * 100}%`,
+                  animationDelay: `${Math.random() * 5}s`,
+                  animationDuration: `${5 + Math.random() * 5}s`,
                 }}
-              >
-                <Snowflake size={flake.size} />
-              </div>
+              />
             ))}
           </div>
         </>
       )}
 
-      {/* Streaming Badge - 右上角 */}
-      {enabled && streamingCount > 0 && !isInCooldown && (
-        <div className="absolute -top-1 -right-1 z-20">
-          <StreamingBadge count={streamingCount} color={color} />
+      {/* Drag Handle & Index */}
+      <div className="relative z-10 flex flex-col items-center gap-1.5 w-7 flex-shrink-0">
+        <div className="p-1 rounded-md hover:bg-surface-hover transition-colors">
+          <GripVertical size={14} className="text-text-muted group-hover:text-text-secondary" />
         </div>
-      )}
-
-      {/* Cooldown Badge - 右上角 */}
-      {isInCooldown && cooldown && (
-        <div className="absolute -top-1 -right-1 z-20 flex items-center gap-1 bg-white/95 dark:bg-cyan-900/95 text-cyan-600 dark:text-cyan-300 text-xs font-bold px-2 py-1 rounded-bl-xl shadow-sm border-l border-b border-cyan-100 dark:border-cyan-800/50 backdrop-blur-md">
-          <Snowflake size={12} className="animate-spin-slow" />
-          <span className="font-mono tracking-tighter">{liveCountdown}</span>
-          <button
-            onClick={handleClearCooldown}
-            disabled={isClearingCooldown}
-            className="ml-1 p-0.5 rounded-full hover:bg-cyan-100 dark:hover:bg-cyan-800/50 transition-colors disabled:opacity-50"
-            title="清除 cooldown"
-          >
-            <X size={10} />
-          </button>
-        </div>
-      )}
-
-      {/* Drag Handle */}
-      <div className={`relative z-10 flex flex-col items-center gap-1 w-6 ${enabled ? '' : 'opacity-40'}`}>
-        <GripVertical size={14} className="text-text-muted" />
-        <span className="text-[10px] font-bold px-1 rounded" style={{ backgroundColor: `${color}20`, color }}>
+        <span 
+          className="text-[10px] font-mono font-bold w-5 h-5 flex items-center justify-center rounded-full border border-border bg-surface-secondary shadow-inner"
+          style={{ color: enabled ? color : 'var(--color-text-muted)' }}
+        >
           {index + 1}
         </span>
       </div>
 
-      {/* Provider Icon */}
-      <div
-        className={`relative z-10 w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 transition-all duration-300 ${
-          isInCooldown
-            ? 'bg-white/60 dark:bg-cyan-900/40 shadow-inner'
-            : enabled
-            ? ''
-            : 'opacity-30 grayscale'
-        }`}
-        style={!isInCooldown ? { backgroundColor: `${color}15`, color } : {}}
-      >
-        <span className={`text-lg font-bold ${isInCooldown ? 'text-cyan-600 dark:text-cyan-300 opacity-40' : ''}`}>
-          {provider.name.charAt(0).toUpperCase()}
-        </span>
-        {isInCooldown && (
-          <div className="absolute inset-0 flex items-center justify-center rounded-lg overflow-hidden">
-             <div className="absolute inset-0 bg-cyan-400/5 backdrop-blur-[1px]" />
-             <Snowflake size={20} className="text-cyan-500 dark:text-cyan-300 relative z-10 animate-pulse drop-shadow-[0_0_5px_rgba(6,182,212,0.3)]" />
+      {/* Provider Main Info */}
+      <div className="relative z-10 flex items-center gap-3 flex-1 min-w-0">
+        {/* Icon */}
+        <div
+          className={cn(
+            "relative w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0 transition-all duration-500 overflow-hidden",
+            isInCooldown ? "bg-cyan-900/40 border border-cyan-500/30" : "bg-surface-secondary border border-border shadow-inner"
+          )}
+          style={!isInCooldown && enabled ? { color } : {}}
+        >
+          <span className={cn(
+            "text-xl font-black transition-all",
+            isInCooldown ? "text-cyan-400 opacity-20 scale-150 blur-[1px]" : enabled ? "scale-100" : "opacity-30 grayscale"
+          )}>
+            {provider.name.charAt(0).toUpperCase()}
+          </span>
+          {isInCooldown && (
+            <Snowflake size={22} className="absolute text-cyan-400 animate-pulse drop-shadow-[0_0_8px_rgba(34,211,238,0.5)]" />
+          )}
+          {enabled && streamingCount > 0 && !isInCooldown && (
+            <div className="absolute inset-0 bg-white/5 animate-pulse" />
+          )}
+        </div>
+
+        {/* Text Info */}
+        <div className="flex flex-col min-w-0">
+          <div className="flex items-center gap-2">
+            <span className={cn(
+              "text-[14px] font-bold truncate transition-colors",
+              isInCooldown ? "text-cyan-200" : enabled ? "text-text-primary" : "text-text-muted"
+            )}>
+              {provider.name}
+            </span>
+            {/* Badges */}
+            <div className="flex items-center gap-1.5 flex-shrink-0">
+              {isNative ? (
+                <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
+                  <Zap size={10} className="fill-emerald-500/20" /> NATIVE
+                </span>
+              ) : (
+                <span className="flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/10 text-amber-500 border border-amber-500/20">
+                  <RefreshCw size={10} /> CONV
+                </span>
+              )}
+            </div>
+          </div>
+          <div className={cn(
+            "text-[11px] font-medium truncate flex items-center gap-1",
+            isInCooldown ? "text-cyan-500/70" : enabled ? "text-text-muted" : "text-text-muted/50"
+          )}>
+            <Info size={10} className="shrink-0" />
+            {provider.config?.custom?.clientBaseURL?.[clientType] ||
+              provider.config?.custom?.baseURL ||
+              provider.config?.antigravity?.endpoint ||
+              'Default endpoint'}
+          </div>
+        </div>
+      </div>
+
+      {/* Quota & Center Countdown Area */}
+      <div className="relative z-10 flex items-center gap-4 flex-shrink-0">
+        {/* Claude Quota */}
+        {isAntigravity && (
+          <div className={cn("w-24 flex flex-col gap-1", !enabled && "opacity-40")}>
+             <div className="flex items-center justify-between px-0.5">
+               <span className="text-[9px] font-black text-text-muted/80 uppercase tracking-tighter">Claude</span>
+               {claudeInfo && <span className="text-[9px] font-mono text-text-muted/60">{formatResetTime(claudeInfo.resetTime)}</span>}
+             </div>
+             {claudeInfo ? (
+               <div className="h-2 bg-surface-secondary rounded-full overflow-hidden border border-border/50 p-[1px]">
+                 <div
+                   className={cn(
+                     "h-full rounded-full transition-all duration-1000",
+                     claudeInfo.percentage >= 50 ? "bg-emerald-500" :
+                     claudeInfo.percentage >= 20 ? "bg-amber-500" : "bg-red-500"
+                   )}
+                   style={{ width: `${claudeInfo.percentage}%`, boxShadow: `0 0 8px ${claudeInfo.percentage >= 50 ? '#10b98140' : '#f59e0b40'}` }}
+                 />
+               </div>
+             ) : <div className="h-1.5 bg-surface-secondary rounded-full" />}
           </div>
         )}
-      </div>
 
-      {/* Provider Info */}
-      <div className="relative z-10 flex-1 min-w-0">
-        <div className="flex items-center gap-2">
-          <span className={`text-body font-medium transition-colors ${
-            isInCooldown
-              ? 'text-cyan-700 dark:text-cyan-200'
-              : enabled
-              ? 'text-text-primary'
-              : 'text-text-muted'
-          }`}>
-            {provider.name}
-          </span>
-          {/* Cooldown indicator */}
-          {isInCooldown && (
-            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-cyan-100 dark:bg-cyan-900/50 text-cyan-700 dark:text-cyan-300 border border-cyan-200 dark:border-cyan-700/50">
-              <Snowflake size={10} />
-              已冻结
-            </span>
-          )}
-          {/* Native/Converted badge */}
-          {!isInCooldown && isNative ? (
-            <span
-              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-400/10 text-emerald-400"
-              title="原生支持"
-            >
-              <Zap size={10} />
-              原生
-            </span>
-          ) : (
-            <span
-              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-400/10 text-amber-400"
-              title="API 转换"
-            >
-              <RefreshCw size={10} />
-              转换
-            </span>
-          )}
-        </div>
-        <div className={`text-caption truncate transition-colors ${
-          isInCooldown ? 'text-cyan-600/70 dark:text-cyan-300/70' :
-          enabled ? 'text-text-muted' : 'text-text-muted/50'
-        }`}>
-          {provider.config?.custom?.clientBaseURL?.[clientType] ||
-            provider.config?.custom?.baseURL ||
-            provider.config?.antigravity?.endpoint ||
-            'Default endpoint'}
-        </div>
-      </div>
-
-      {/* Claude Quota (仅 Antigravity) */}
-      {isAntigravity && (
-        <div className={`relative z-10 w-24 flex flex-col items-center gap-1 flex-shrink-0 ${enabled ? '' : 'opacity-40'}`}>
-          <div className="flex items-center gap-1.5 w-full">
-            <span className="text-[10px] text-text-muted uppercase tracking-wider font-medium">Claude</span>
-            {claudeInfo && (
-              <span className="text-[10px] text-text-muted/70" title="重置时间">
-                ({formatResetTime(claudeInfo.resetTime)})
-              </span>
+        {/* Center-placed Countdown (when in cooldown) or Stats Grid */}
+        {isInCooldown && cooldown ? (
+          <div
+            className="flex items-center gap-3 bg-cyan-950/40 rounded-xl border border-cyan-500/40 p-1 px-3 backdrop-blur-md shadow-[0_0_15px_rgba(6,182,212,0.1)]"
+          >
+            <div className="flex flex-col items-center">
+              <span className="text-[8px] font-black text-cyan-500/60 uppercase tracking-tight">Remaining</span>
+              <div className="flex items-center gap-1.5">
+                <Snowflake size={12} className="text-cyan-400 animate-spin-slow" />
+                <span className="text-sm font-mono font-black text-cyan-400">{liveCountdown}</span>
+              </div>
+            </div>
+            <div className="w-px h-6 bg-cyan-500/20" />
+            <div className="flex flex-col items-center text-cyan-500/40">
+               <Zap size={14} />
+               <span className="text-[8px] font-bold">FROZEN</span>
+            </div>
+          </div>
+        ) : (
+          <div className={cn(
+            "flex items-center gap-px bg-surface-secondary/50 rounded-xl border border-border/60 p-0.5 backdrop-blur-sm",
+            !enabled && "opacity-40"
+          )}>
+            {stats && stats.totalRequests > 0 ? (
+              <>
+                {/* Success */}
+                <div className="flex flex-col items-center min-w-[50px] px-2 py-1">
+                  <span className="text-[8px] font-bold text-text-muted uppercase tracking-tight">SR</span>
+                  <span className={cn(
+                    "font-mono font-black text-xs",
+                    stats.successRate >= 95 ? "text-emerald-500" :
+                    stats.successRate >= 90 ? "text-blue-400" : "text-amber-500"
+                  )}>
+                    {Math.round(stats.successRate)}%
+                  </span>
+                </div>
+                <div className="w-[1px] h-6 bg-border/40" />
+                {/* Tokens */}
+                <div className="flex flex-col items-center min-w-[50px] px-2 py-1">
+                  <span className="text-[8px] font-bold text-text-muted uppercase tracking-tight">TOKEN</span>
+                  <span className="font-mono font-black text-xs text-blue-400">
+                    {formatTokens(stats.totalInputTokens + stats.totalOutputTokens)}
+                  </span>
+                </div>
+                <div className="w-[1px] h-6 bg-border/40" />
+                {/* Cost */}
+                <div className="flex flex-col items-center min-w-[60px] px-2 py-1">
+                  <span className="text-[8px] font-bold text-text-muted uppercase tracking-tight">COST</span>
+                  <span className="font-mono font-black text-xs text-purple-400">
+                    {formatCost(stats.totalCost)}
+                  </span>
+                </div>
+              </>
+            ) : (
+              <div className="px-6 py-2 flex items-center gap-2 text-text-muted/30">
+                <Activity size={12} />
+                <span className="text-[10px] font-bold uppercase tracking-widest">No Data</span>
+              </div>
             )}
           </div>
-          {claudeInfo !== null ? (
-            <div className="flex items-center gap-1.5 w-full">
-              <div className="flex-1 h-1.5 bg-surface-hover rounded-full overflow-hidden">
-                <div
-                  className={cn(
-                    "h-full transition-all duration-300",
-                    claudeInfo.percentage >= 50 ? "bg-emerald-400" :
-                    claudeInfo.percentage >= 20 ? "bg-amber-400" : "bg-red-400"
-                  )}
-                  style={{ width: `${claudeInfo.percentage}%` }}
-                />
-              </div>
-              <span className={cn(
-                "text-xs font-mono font-bold min-w-[2.5rem] text-right",
-                claudeInfo.percentage >= 50 ? "text-emerald-400" :
-                claudeInfo.percentage >= 20 ? "text-amber-400" : "text-red-400"
-              )}>
-                {claudeInfo.percentage}%
-              </span>
-            </div>
-          ) : (
-            <span className="text-xs text-text-muted">-</span>
-          )}
-        </div>
-      )}
-
-      {/* Provider Stats */}
-      <div className={`relative z-10 flex items-center gap-2 bg-surface-secondary/30 rounded-lg p-1 border border-border/30 ${enabled ? '' : 'opacity-40'}`}>
-        {stats && stats.totalRequests > 0 ? (
-          <>
-            {/* Success Rate */}
-            <div className="flex flex-col items-center justify-center px-2 py-1 w-[60px]">
-              <span className="text-[10px] text-text-muted uppercase tracking-wider font-medium mb-0.5">成功</span>
-              <span className={cn(
-                "font-mono font-bold text-sm",
-                stats.successRate >= 95 ? "text-emerald-400" :
-                stats.successRate >= 90 ? "text-blue-400" :
-                stats.successRate >= 80 ? "text-amber-400" : "text-red-400"
-              )}>
-                {stats.successRate.toFixed(1)}%
-              </span>
-            </div>
-
-            <div className="w-px h-8 bg-border/40" />
-
-            {/* Request Count */}
-            <div className="flex flex-col items-center justify-center px-2 py-1 w-[60px]" title={`成功: ${stats.successfulRequests}, 失败: ${stats.failedRequests}`}>
-              <span className="text-[10px] text-text-muted uppercase tracking-wider font-medium mb-0.5">请求</span>
-              <span className="font-mono font-bold text-sm text-text-primary">{stats.totalRequests}</span>
-            </div>
-
-            <div className="w-px h-8 bg-border/40" />
-
-            {/* Token Usage */}
-            <div className="flex flex-col items-center justify-center px-2 py-1 w-[60px]" title={`输入: ${stats.totalInputTokens}, 输出: ${stats.totalOutputTokens}`}>
-              <span className="text-[10px] text-text-muted uppercase tracking-wider font-medium mb-0.5">Token</span>
-              <span className="font-mono font-bold text-sm text-blue-400">
-                {formatTokens(stats.totalInputTokens + stats.totalOutputTokens)}
-              </span>
-            </div>
-
-            <div className="w-px h-8 bg-border/40" />
-
-            {/* Cache Rate */}
-            <div
-              className="flex flex-col items-center justify-center px-2 py-1 w-[60px]"
-              title={`Read: ${formatTokens(stats.totalCacheRead)} | Write: ${formatTokens(stats.totalCacheWrite)}`}
-            >
-              <span className="text-[10px] text-text-muted uppercase tracking-wider font-medium mb-0.5">缓存</span>
-              <span className={cn(
-                "font-mono font-bold text-sm",
-                calcCacheRate(stats) >= 50 ? "text-emerald-400" :
-                calcCacheRate(stats) >= 20 ? "text-cyan-400" : "text-text-secondary"
-              )}>
-                {calcCacheRate(stats).toFixed(1)}%
-              </span>
-            </div>
-
-            <div className="w-px h-8 bg-border/40" />
-
-            {/* Cost */}
-            <div className="flex flex-col items-center justify-center px-2 py-1 w-[70px]" title={`总成本: ${formatCost(stats.totalCost)}`}>
-              <span className="text-[10px] text-text-muted uppercase tracking-wider font-medium mb-0.5">成本</span>
-              <span className="font-mono font-bold text-sm text-purple-400">{formatCost(stats.totalCost)}</span>
-            </div>
-          </>
-        ) : (
-          <div className="px-4 py-2 flex items-center gap-2 text-text-muted/50">
-            <Activity size={14} />
-            <span className="text-xs font-medium">暂无数据</span>
-          </div>
         )}
       </div>
 
-      {/* Settings button */}
-      {route && (
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            // TODO: Navigate to route settings
-          }}
-          className={`relative z-10 p-2 rounded-md transition-colors ${
-            enabled
-              ? 'text-text-muted hover:text-text-primary hover:bg-emerald-400/10'
-              : 'text-text-muted/30 cursor-not-allowed'
-          }`}
-          title="Route Settings"
-          disabled={!enabled}
-        >
-          <Settings size={16} />
-        </button>
+      {/* Streaming Indicator - Top Right */}
+      {enabled && streamingCount > 0 && !isInCooldown && (
+        <div className="absolute top-0 right-0 z-20">
+          <StreamingBadge count={streamingCount} color={color} />
+        </div>
       )}
-
-      {/* Delete button (only for non-native converted routes) */}
-      {route && !isNative && onDelete && (
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            if (confirm('确定要删除这个转换路由吗？')) {
-              onDelete();
-            }
-          }}
-          className="relative z-10 p-2 rounded-md text-text-muted hover:text-red-400 hover:bg-red-400/10 transition-colors"
-          title="删除转换路由"
-        >
-          <Trash2 size={16} />
-        </button>
-      )}
-
-      {/* Toggle indicator */}
-      <div className="relative z-10 flex items-center gap-3">
-        <span
-          className={`text-[10px] font-mono font-bold tracking-wider transition-colors w-6 text-right ${
-            isInCooldown
-              ? 'text-cyan-400'
-              : enabled
-              ? 'text-emerald-400'
-              : 'text-text-muted/40'
-          }`}
-        >
-          {isInCooldown ? '冻结' : enabled ? 'ON' : 'OFF'}
-        </span>
-        <Switch
-          checked={enabled}
-          onCheckedChange={() => !isInCooldown && onToggle()}
-          disabled={isToggling || isInCooldown}
-        />
-      </div>
     </div>
   );
 }

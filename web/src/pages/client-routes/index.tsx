@@ -249,9 +249,7 @@ export function ClientRoutesPage() {
                     clientType={clientType as ClientType}
                     streamingCount={countsByProviderAndClient.get(`${activeItem.provider.id}:${clientType}`) || 0}
                     stats={providerStats[activeItem.provider.id]}
-                    isToggling={false}
                     isOverlay
-                    onToggle={() => {}}
                   />
                 )}
               </DragOverlay>
