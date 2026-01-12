@@ -1,56 +1,30 @@
 import { useState } from 'react';
-import { Button, Card, CardContent, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, Input } from '@/components/ui';
-import { useProjects, useCreateProject, useUpdateProject, useDeleteProject } from '@/hooks/queries';
-import { Plus, Trash2, Pencil, Check, X, FolderKanban, Loader2, Calendar } from 'lucide-react';
-import type { Project } from '@/lib/transport';
+import { useNavigate } from 'react-router-dom';
+import { Button, Card, CardContent, CardHeader, CardTitle, Input, CardFooter } from '@/components/ui';
+import { useProjects, useCreateProject } from '@/hooks/queries';
+import { Plus, X, FolderKanban, Loader2, Calendar, ArrowRight, Hash } from 'lucide-react';
 
 export function ProjectsPage() {
+  const navigate = useNavigate();
   const { data: projects, isLoading } = useProjects();
   const createProject = useCreateProject();
-  const updateProject = useUpdateProject();
-  const deleteProject = useDeleteProject();
   const [showForm, setShowForm] = useState(false);
   const [name, setName] = useState('');
-  const [editingId, setEditingId] = useState<number | null>(null);
-  const [editingName, setEditingName] = useState('');
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     createProject.mutate({ name }, {
-      onSuccess: () => {
+      onSuccess: (project) => {
         setShowForm(false);
         setName('');
+        // 创建后自动跳转到详情页
+        navigate(`/projects/${project.slug}`);
       },
     });
   };
 
-  const handleEdit = (project: Project) => {
-    setEditingId(project.id);
-    setEditingName(project.name);
-  };
-
-  const handleSaveEdit = () => {
-    if (editingId === null) return;
-    updateProject.mutate(
-      { id: editingId, data: { name: editingName } },
-      {
-        onSuccess: () => {
-          setEditingId(null);
-          setEditingName('');
-        },
-      }
-    );
-  };
-
-  const handleCancelEdit = () => {
-    setEditingId(null);
-    setEditingName('');
-  };
-
-  const handleDelete = (id: number) => {
-    if (confirm('Are you sure you want to delete this project?')) {
-      deleteProject.mutate(id);
-    }
+  const handleRowClick = (slug: string) => {
+    navigate(`/projects/${slug}`);
   };
 
   return (
@@ -98,105 +72,56 @@ export function ProjectsPage() {
           </Card>
         )}
 
-        <Card className="border-border bg-surface-primary">
-          <CardContent className="p-0">
-            {isLoading ? (
-              <div className="flex items-center justify-center p-12">
-                <Loader2 className="h-8 w-8 animate-spin text-accent" />
+        {isLoading ? (
+          <div className="flex items-center justify-center p-12">
+            <Loader2 className="h-8 w-8 animate-spin text-accent" />
+          </div>
+        ) : (
+          <>
+            {projects && projects.length > 0 ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                {projects.map((project) => (
+                  <Card
+                    key={project.id}
+                    className="group border-border bg-surface-primary cursor-pointer hover:border-accent/50 hover:shadow-md transition-all duration-200 flex flex-col"
+                    onClick={() => handleRowClick(project.slug)}
+                  >
+                    <CardHeader className="pb-3 space-y-0">
+                      <div className="flex justify-between items-start">
+                        <div className="p-2 bg-surface-secondary rounded-md text-text-secondary group-hover:text-accent group-hover:bg-accent/10 transition-colors">
+                          <FolderKanban size={20} />
+                        </div>
+                      </div>
+                      <CardTitle className="pt-3 text-base font-semibold text-text-primary leading-tight truncate">
+                        {project.name}
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="pb-3 flex-1">
+                      <div className="flex items-center gap-2 text-xs text-text-secondary bg-surface-secondary/50 p-2 rounded border border-transparent group-hover:border-border transition-colors">
+                        <Hash size={12} className="opacity-50" />
+                        <span className="font-mono truncate">{project.slug}</span>
+                      </div>
+                    </CardContent>
+                    <CardFooter className="pt-0 text-xs text-text-muted flex justify-between items-center border-t border-border/50 mt-auto p-4 bg-surface-secondary/20">
+                      <span>
+                        Created {new Date(project.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+                      </span>
+                      <div className="flex items-center text-accent opacity-0 -translate-x-2 group-hover:opacity-100 group-hover:translate-x-0 transition-all duration-200 font-medium">
+                        Manage <ArrowRight size={12} className="ml-1" />
+                      </div>
+                    </CardFooter>
+                  </Card>
+                ))}
               </div>
             ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow className="hover:bg-transparent border-border">
-                    <TableHead className="w-[100px] text-text-secondary">ID</TableHead>
-                    <TableHead className="text-text-secondary">Name</TableHead>
-                    <TableHead className="text-text-secondary">Created</TableHead>
-                    <TableHead className="w-[100px] text-right text-text-secondary">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {projects?.map((project) => (
-                    <TableRow key={project.id} className="border-border hover:bg-surface-hover">
-                      <TableCell className="font-mono text-xs text-text-muted">{project.id}</TableCell>
-                      <TableCell>
-                        {editingId === project.id ? (
-                          <Input
-                            value={editingName}
-                            onChange={(e) => setEditingName(e.target.value)}
-                            className="h-8 bg-surface-secondary border-border"
-                            autoFocus
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') handleSaveEdit();
-                              if (e.key === 'Escape') handleCancelEdit();
-                            }}
-                          />
-                        ) : (
-                          <span className="font-medium text-text-primary">{project.name}</span>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-text-secondary text-xs">
-                        {new Date(project.createdAt).toLocaleDateString()}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        {editingId === project.id ? (
-                          <div className="flex justify-end gap-1">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={handleSaveEdit}
-                              disabled={updateProject.isPending}
-                              className="h-8 w-8 p-0 text-success hover:text-success hover:bg-success/10"
-                            >
-                              <Check className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={handleCancelEdit}
-                              className="h-8 w-8 p-0 text-text-muted hover:text-text-primary"
-                            >
-                              <X className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        ) : (
-                          <div className="flex justify-end gap-1">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleEdit(project)}
-                              className="h-8 w-8 p-0 text-text-muted hover:text-text-primary"
-                            >
-                              <Pencil className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleDelete(project.id)}
-                              disabled={deleteProject.isPending}
-                              className="h-8 w-8 p-0 text-text-muted hover:text-error hover:bg-error/10"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        )}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                  {(!projects || projects.length === 0) && (
-                    <TableRow>
-                      <TableCell colSpan={4} className="h-32 text-center text-text-muted border-border">
-                         <div className="flex flex-col items-center justify-center gap-2">
-                           <Calendar className="h-8 w-8 opacity-20" />
-                           <p>No projects found</p>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  )}
-                </TableBody>
-              </Table>
+              <div className="flex flex-col items-center justify-center h-64 text-text-muted border-2 border-dashed border-border rounded-lg bg-surface-primary/50">
+                <Calendar className="h-12 w-12 opacity-20 mb-4" />
+                <p className="text-lg font-medium">No projects found</p>
+                <p className="text-sm">Create a new project to get started</p>
+              </div>
             )}
-          </CardContent>
-        </Card>
+          </>
+        )}
       </div>
     </div>
   );
