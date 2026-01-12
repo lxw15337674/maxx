@@ -565,7 +565,7 @@ export function RequestDetailPage() {
             <h4 className="text-sm font-medium text-red-400 mb-1">
               Request Failed
             </h4>
-            <pre className="whitespace-pre-wrap wrap-break-word font-mono text-xs text-red-400/90 max-h-24 overflow-auto">
+            <pre className="whitespace-pre-wrap break-words font-mono text-xs text-red-400/90 max-h-24 overflow-auto">
               {request.error}
             </pre>
           </div>
@@ -859,7 +859,7 @@ export function RequestDetailPage() {
                                 JSON
                               </Badge>
                             </div>
-                            <pre className="text-xs font-mono text-text-secondary leading-relaxed whitespace-pre-wrap break-all">
+                            <pre className="text-xs font-mono text-text-secondary leading-relaxed whitespace-pre-wrap break-words">
                               {formatJSON(selectedAttempt.requestInfo.headers)}
                             </pre>
                           </div>
@@ -910,7 +910,7 @@ export function RequestDetailPage() {
                                   JSON
                                 </Badge>
                               </div>
-                              <pre className="text-xs font-mono text-text-primary whitespace-pre-wrap break-all leading-relaxed">
+                              <pre className="text-xs font-mono text-text-primary whitespace-pre-wrap break-words leading-relaxed">
                                 {(() => {
                                   try {
                                     return formatJSON(
@@ -971,7 +971,7 @@ export function RequestDetailPage() {
                                 JSON
                               </Badge>
                             </div>
-                            <pre className="text-xs font-mono text-text-secondary leading-relaxed">
+                            <pre className="text-xs font-mono text-text-secondary leading-relaxed whitespace-pre-wrap break-words">
                               {formatJSON(selectedAttempt.responseInfo.headers)}
                             </pre>
                           </div>
@@ -1003,7 +1003,7 @@ export function RequestDetailPage() {
                                   JSON
                                 </Badge>
                               </div>
-                              <pre className="text-xs font-mono text-text-primary whitespace-pre-wrap leading-relaxed">
+                              <pre className="text-xs font-mono text-text-primary whitespace-pre-wrap break-words leading-relaxed">
                                 {(() => {
                                   try {
                                     return formatJSON(
@@ -1308,7 +1308,7 @@ function RequestDetailView({
                         JSON
                       </Badge>
                     </div>
-                    <pre className="text-xs font-mono text-text-secondary leading-relaxed">
+                    <pre className="text-xs font-mono text-text-secondary leading-relaxed whitespace-pre-wrap break-words">
                       {formatJSON(request.requestInfo.headers)}
                     </pre>
                   </div>
@@ -1340,7 +1340,7 @@ function RequestDetailView({
                           JSON
                         </Badge>
                       </div>
-                      <pre className="text-xs font-mono text-text-primary whitespace-pre-wrap leading-relaxed">
+                      <pre className="text-xs font-mono text-text-primary whitespace-pre-wrap break-words leading-relaxed">
                         {(() => {
                           try {
                             return formatJSON(
@@ -1399,7 +1399,7 @@ function RequestDetailView({
                         JSON
                       </Badge>
                     </div>
-                    <pre className="text-xs font-mono text-text-secondary leading-relaxed">
+                    <pre className="text-xs font-mono text-text-secondary leading-relaxed whitespace-pre-wrap break-words">
                       {formatJSON(request.responseInfo.headers)}
                     </pre>
                   </div>
@@ -1431,7 +1431,7 @@ function RequestDetailView({
                           JSON
                         </Badge>
                       </div>
-                      <pre className="text-xs font-mono text-text-primary whitespace-pre-wrap leading-relaxed">
+                      <pre className="text-xs font-mono text-text-primary whitespace-pre-wrap break-words leading-relaxed">
                         {(() => {
                           try {
                             return formatJSON(
