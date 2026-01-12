@@ -298,6 +298,18 @@ func (d *DB) migrate() error {
 		}
 	}
 
+	// Migration: Add status_code column to proxy_requests if it doesn't exist
+	var hasStatusCode bool
+	row = d.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('proxy_requests') WHERE name='status_code'`)
+	row.Scan(&hasStatusCode)
+
+	if !hasStatusCode {
+		_, err = d.db.Exec(`ALTER TABLE proxy_requests ADD COLUMN status_code INTEGER DEFAULT 0`)
+		if err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 

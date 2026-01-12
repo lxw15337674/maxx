@@ -155,6 +155,7 @@ export interface ProxyRequest {
   duration: number; // nanoseconds
   isStream: boolean; // 是否为 SSE 流式请求
   status: ProxyRequestStatus;
+  statusCode: number; // HTTP 状态码（冗余存储，用于列表查询优化）
   requestInfo: RequestInfo | null;
   responseInfo: ResponseInfo | null;
   error: string;

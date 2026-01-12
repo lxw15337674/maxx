@@ -244,6 +244,7 @@ func (e *Executor) Execute(ctx context.Context, w http.ResponseWriter, req *http
 					Headers: responseCapture.CapturedHeaders(),
 					Body:    responseCapture.Body(),
 				}
+				proxyReq.StatusCode = responseCapture.StatusCode()
 
 				// Extract token usage from final client response (not from upstream attempt)
 				// This ensures we use the correct format (Claude/OpenAI/Gemini) for the client type
@@ -295,6 +296,7 @@ func (e *Executor) Execute(ctx context.Context, w http.ResponseWriter, req *http
 					Headers: responseCapture.CapturedHeaders(),
 					Body:    responseCapture.Body(),
 				}
+				proxyReq.StatusCode = responseCapture.StatusCode()
 
 				// Extract token usage from final client response
 				if metrics := usage.ExtractFromResponse(responseCapture.Body()); metrics != nil {

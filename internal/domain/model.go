@@ -164,6 +164,9 @@ type ProxyRequest struct {
 	// PENDING, IN_PROGRESS, COMPLETED, FAILED
 	Status string `json:"status"`
 
+	// HTTP 状态码（冗余存储，用于列表查询性能优化）
+	StatusCode int `json:"statusCode"`
+
 	// 原始请求的信息
 	RequestInfo  *RequestInfo  `json:"requestInfo"`
 	ResponseInfo *ResponseInfo `json:"responseInfo"`

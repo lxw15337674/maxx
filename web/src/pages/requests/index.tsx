@@ -434,8 +434,8 @@ function LogRow({
       ? 'text-amber-400'
       : 'text-text-secondary'
 
-  // Get HTTP status code from responseInfo
-  const statusCode = request.responseInfo?.status
+  // Get HTTP status code (use denormalized field for list performance)
+  const statusCode = request.statusCode || request.responseInfo?.status
 
   return (
     <TableRow
