@@ -181,6 +181,9 @@ export interface ProxyUpstreamAttempt {
   id: number;
   createdAt: string;
   updatedAt: string;
+  startTime: string;
+  endTime: string;
+  duration: number; // nanoseconds
   status: ProxyUpstreamAttemptStatus;
   proxyRequestID: number;
   isStream: boolean; // 是否为 SSE 流式请求

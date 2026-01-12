@@ -201,6 +201,11 @@ type ProxyUpstreamAttempt struct {
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
 
+	// 实际开始和结束时间
+	StartTime time.Time     `json:"startTime"`
+	EndTime   time.Time     `json:"endTime"`
+	Duration  time.Duration `json:"duration"`
+
 	// PENDING, IN_PROGRESS, COMPLETED, FAILED
 	Status string `json:"status"`
 

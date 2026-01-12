@@ -278,6 +278,26 @@ func (d *DB) migrate() error {
 		}
 	}
 
+	// Migration: Add start_time, end_time and duration columns to proxy_upstream_attempts
+	var hasStartTime bool
+	row = d.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('proxy_upstream_attempts') WHERE name='start_time'`)
+	row.Scan(&hasStartTime)
+
+	if !hasStartTime {
+		_, err = d.db.Exec(`ALTER TABLE proxy_upstream_attempts ADD COLUMN start_time DATETIME`)
+		if err != nil {
+			return err
+		}
+		_, err = d.db.Exec(`ALTER TABLE proxy_upstream_attempts ADD COLUMN end_time DATETIME`)
+		if err != nil {
+			return err
+		}
+		_, err = d.db.Exec(`ALTER TABLE proxy_upstream_attempts ADD COLUMN duration_ms INTEGER DEFAULT 0`)
+		if err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 

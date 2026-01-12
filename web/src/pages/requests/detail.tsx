@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Button, Card, CardContent, CardHeader, CardTitle, Badge } from '@/components/ui';
-import { useProxyRequest, useProxyUpstreamAttempts, useProxyRequestUpdates, useProviders, useProjects, useSessions } from '@/hooks/queries';
+import { useProxyRequest, useProxyUpstreamAttempts, useProxyRequestUpdates, useProviders, useProjects, useSessions, useRoutes } from '@/hooks/queries';
 import {
   ArrowLeft,
   Clock,
@@ -49,6 +49,7 @@ export function RequestDetailPage() {
   const { data: providers } = useProviders();
   const { data: projects } = useProjects();
   const { data: sessions } = useSessions();
+  const { data: routes } = useRoutes();
   const [selection, setSelection] = useState<SelectionType>({ type: 'request' });
   const [activeTab, setActiveTab] = useState<'request' | 'response' | 'metadata'>('request');
 
@@ -93,6 +94,13 @@ export function RequestDetailPage() {
     sessions?.forEach(s => map.set(s.sessionID, { clientType: s.clientType, projectID: s.projectID }));
     return map;
   }, [sessions]);
+
+  // Create lookup map for routes by routeID
+  const routeMap = useMemo(() => {
+    const map = new Map<number, { projectID: number }>();
+    routes?.forEach(r => map.set(r.id, { projectID: r.projectID }));
+    return map;
+  }, [routes]);
 
   const formatDuration = (ns: number) => {
     const ms = ns / 1_000_000;
@@ -339,9 +347,18 @@ export function RequestDetailPage() {
                         <div className="flex items-center justify-between text-xs text-text-muted">
                           <span className="flex items-center gap-1.5 truncate max-w-[140px]" title={providerMap.get(attempt.providerID) || `Provider #${attempt.providerID}`}>
                             {providerMap.get(attempt.providerID) || `Provider #${attempt.providerID}`}
+                            {(() => {
+                              const route = routeMap.get(attempt.routeID);
+                              if (route?.projectID === 0) {
+                                return <Badge variant="outline" className="text-[9px] h-4 px-1 ml-1">Global</Badge>;
+                              } else if (route?.projectID) {
+                                return <Badge variant="info" className="text-[9px] h-4 px-1 ml-1">{projectMap.get(route.projectID) || `#${route.projectID}`}</Badge>;
+                              }
+                              return null;
+                            })()}
                           </span>
                            <span className="font-mono opacity-70">
-                            {formatDuration((new Date(attempt.updatedAt).getTime() - new Date(attempt.createdAt).getTime()) * 1_000_000)}
+                            {attempt.duration > 0 ? formatDuration(attempt.duration) : '-'}
                           </span>
                         </div>
                       </button>
