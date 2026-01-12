@@ -390,7 +390,7 @@ export function RoutesTab({ project }: RoutesTabProps) {
   return (
     <div className="flex h-full">
       {/* Left Sidebar - ClientType List */}
-      <aside className="w-[220px] min-w-[220px] max-w-[220px] flex flex-col border-r border-border bg-surface-primary">
+      <aside className="w-1/5 min-w-[200px] flex flex-col border-r border-border bg-surface-primary">
         <div className="h-[73px] p-lg border-b border-border flex items-center">
           <span className="text-sm font-medium text-text-primary">Client Types</span>
         </div>
