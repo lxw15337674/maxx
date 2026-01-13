@@ -33,6 +33,7 @@ import type {
 } from './types';
 
 // 导入 Wails 自动生成的绑定
+// @ts-ignore - Wails 绑定在构建时可能不存在
 import * as DesktopApp from '@/wailsjs/go/desktop/DesktopApp';
 
 // Wails 事件 API 类型
