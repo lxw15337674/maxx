@@ -15,9 +15,9 @@ import { cn } from '@/lib/utils';
 import { getClientName, getClientColor } from '@/components/icons/client-icons';
 
 interface ForceProjectDialogProps {
-  event: NewSessionPendingEvent | null;
-  onClose: () => void;
-  timeoutSeconds: number;
+  event: NewSessionPendingEvent | null
+  onClose: () => void
+  timeoutSeconds: number
 }
 
 export function ForceProjectDialog({
@@ -25,72 +25,72 @@ export function ForceProjectDialog({
   onClose,
   timeoutSeconds,
 }: ForceProjectDialogProps) {
-  const { data: projects, isLoading } = useProjects();
-  const updateSessionProject = useUpdateSessionProject();
-  const rejectSession = useRejectSession();
-  const [selectedProjectId, setSelectedProjectId] = useState<number>(0);
-  const [remainingTime, setRemainingTime] = useState(timeoutSeconds);
+  const { data: projects, isLoading } = useProjects()
+  const updateSessionProject = useUpdateSessionProject()
+  const rejectSession = useRejectSession()
+  const [selectedProjectId, setSelectedProjectId] = useState<number>(0)
+  const [remainingTime, setRemainingTime] = useState(timeoutSeconds)
 
   // Reset state when event changes
   useEffect(() => {
     if (event) {
-      setSelectedProjectId(0);
-      setRemainingTime(timeoutSeconds);
+      setSelectedProjectId(0)
+      setRemainingTime(timeoutSeconds)
     }
-  }, [event, timeoutSeconds]);
+  }, [event, timeoutSeconds])
 
   // Countdown timer
   useEffect(() => {
-    if (!event) return;
+    if (!event) return
 
     const interval = setInterval(() => {
       setRemainingTime(prev => {
         if (prev <= 1) {
-          clearInterval(interval);
-          return 0;
+          clearInterval(interval)
+          return 0
         }
-        return prev - 1;
-      });
-    }, 1000);
+        return prev - 1
+      })
+    }, 1000)
 
-    return () => clearInterval(interval);
-  }, [event]);
+    return () => clearInterval(interval)
+  }, [event])
 
   // 超时后关闭弹窗
   useEffect(() => {
     if (remainingTime === 0 && event) {
-      onClose();
+      onClose()
     }
-  }, [remainingTime, event, onClose]);
+  }, [remainingTime, event, onClose])
 
   const handleConfirm = async () => {
-    if (!event || selectedProjectId === 0) return;
+    if (!event || selectedProjectId === 0) return
 
     try {
       await updateSessionProject.mutateAsync({
         sessionID: event.sessionID,
         projectID: selectedProjectId,
-      });
-      onClose();
+      })
+      onClose()
     } catch (error) {
-      console.error('Failed to bind project:', error);
+      console.error('Failed to bind project:', error)
     }
-  };
+  }
 
   const handleReject = async () => {
-    if (!event) return;
+    if (!event) return
 
     try {
-      await rejectSession.mutateAsync(event.sessionID);
-      onClose();
+      await rejectSession.mutateAsync(event.sessionID)
+      onClose()
     } catch (error) {
-      console.error('Failed to reject session:', error);
+      console.error('Failed to reject session:', error)
     }
-  };
+  }
 
-  if (!event) return null;
+  if (!event) return null
 
-  const clientColor = getClientColor(event.clientType);
+  const clientColor = getClientColor(event.clientType)
 
   return (
     <Dialog open={!!event} onOpenChange={(open) => !open && onClose()}>
@@ -124,7 +124,10 @@ export function ForceProjectDialog({
                 </span>
                 <span
                   className="px-1.5 py-0.5 rounded text-[10px] font-mono font-medium"
-                  style={{ backgroundColor: `${clientColor}20`, color: clientColor }}
+                  style={{
+                    backgroundColor: `${clientColor}20`,
+                    color: clientColor,
+                  }}
                 >
                   {getClientName(event.clientType)}
                 </span>
@@ -140,8 +143,8 @@ export function ForceProjectDialog({
             className={cn(
               'relative overflow-hidden rounded-xl border p-5 flex flex-col items-center justify-center group',
               remainingTime <= 10
-                ? 'bg-gradient-to-br from-red-950/30 to-transparent border-red-500/20'
-                : 'bg-gradient-to-br from-amber-950/30 to-transparent border-amber-500/20'
+                ? 'bg-linear-to-br from-red-950/30 to-transparent border-red-500/20'
+                : 'bg-linear-to-br from-amber-950/30 to-transparent border-amber-500/20'
             )}
           >
             <div
@@ -216,7 +219,9 @@ export function ForceProjectDialog({
               {/* Reject Button */}
               <button
                 onClick={handleReject}
-                disabled={rejectSession.isPending || updateSessionProject.isPending}
+                disabled={
+                  rejectSession.isPending || updateSessionProject.isPending
+                }
                 className="flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-xl border border-red-500/30 bg-red-500/10 text-red-400 hover:bg-red-500/20 hover:border-red-500/50 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {rejectSession.isPending ? (
@@ -235,7 +240,11 @@ export function ForceProjectDialog({
               {/* Confirm Button */}
               <button
                 onClick={handleConfirm}
-                disabled={selectedProjectId === 0 || updateSessionProject.isPending || rejectSession.isPending}
+                disabled={
+                  selectedProjectId === 0 ||
+                  updateSessionProject.isPending ||
+                  rejectSession.isPending
+                }
                 className="flex-1 relative overflow-hidden rounded-xl p-[1px] group disabled:opacity-50 disabled:cursor-not-allowed transition-all hover:scale-[1.01] active:scale-[0.99]"
               >
                 <span className="absolute inset-0 bg-gradient-to-r from-amber-500 to-orange-600 rounded-xl" />
@@ -243,7 +252,9 @@ export function ForceProjectDialog({
                   {updateSessionProject.isPending ? (
                     <>
                       <div className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" />
-                      <span className="text-sm font-bold text-white">绑定中...</span>
+                      <span className="text-sm font-bold text-white">
+                        绑定中...
+                      </span>
                     </>
                   ) : (
                     <>
