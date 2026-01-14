@@ -1,42 +1,337 @@
-name: Wails build
+name: Release
 
 on:
   push:
     tags:
-    # Match any new tag
-      - '*'
+      - 'v*'
 
-env:
-  # Necessary for most environments as build failure can occur due to OOM issues
-  NODE_OPTIONS: "--max-old-space-size=4096"
+permissions:
+  contents: write
 
 jobs:
-  build:
+  build-macos:
+    name: Build macOS
+    runs-on: macos-latest
     strategy:
-    # Failure in one platform build won't impact the others
-      fail-fast: false
       matrix:
-        build:
-          - name: 'App'
-            platform:  'linux/amd64'
-            os: 'ubuntu-latest'
-          - name: 'App'
-            platform:  'windows/amd64'
-            os: 'windows-latest'
-          - name: 'App'
-            platform:  'darwin/universal'
-            os: 'macos-latest'
-
-    runs-on: ${{ matrix.build.os }}
+        arch: [arm64, amd64]
     steps:
-      - name: Checkout
-        uses: actions/checkout@v2
-        with:
-          submodules: recursive
+      - uses: actions/checkout@v4
 
-      - name: Build wails
-        uses: dAppServer/wails-build-action@v3
-        id: build
+      - uses: actions/setup-go@v5
         with:
-          build-name: ${{ matrix.build.name }}
-          build-platform: ${{ matrix.build.platform }}
+          go-version: '1.25'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install Wails
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+
+      - name: Install frontend dependencies
+        run: cd web && npm install
+
+      - name: Build macOS ${{ matrix.arch }}
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          ARCH=${{ matrix.arch }}
+          if [ "$ARCH" = "arm64" ]; then
+            GOARCH=arm64
+          else
+            GOARCH=amd64
+          fi
+          GOOS=darwin GOARCH=$GOARCH wails build -platform darwin/$ARCH -ldflags "-X github.com/Bowl42/maxx-next/internal/version.Version=$VERSION" -clean
+
+      - name: Find and archive macOS app
+        run: |
+          cd build/bin
+          # Find the .app bundle
+          APP_NAME=$(ls -d *.app | head -n 1)
+          if [ -z "$APP_NAME" ]; then
+            echo "App bundle not found" >&2
+            ls -la
+            exit 1
+          fi
+          echo "Found app: $APP_NAME"
+          ditto -c -k --sequesterRsrc --keepParent "$APP_NAME" ../../bin/codeswitch-macos-${{ matrix.arch }}.zip
+          cd ../..
+          mkdir -p bin
+          mv build/bin/codeswitch-macos-${{ matrix.arch }}.zip bin/ || true
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-${{ matrix.arch }}
+          path: bin/codeswitch-macos-${{ matrix.arch }}.zip
+
+  build-windows:
+    name: Build Windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install Wails
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+
+      - name: Install frontend dependencies
+        run: cd web && npm install
+
+      - name: Build Windows Binary
+        run: |
+          $VERSION = "${{ github.ref_name }}".TrimStart('v')
+          wails build -platform windows/amd64 -ldflags "-X github.com/Bowl42/maxx-next/internal/version.Version=$VERSION" -clean
+
+      - name: Verify and prepare Binary
+        run: |
+          # Wails v2 outputs to build/bin
+          if (Test-Path "build\bin\maxx.exe") {
+            Write-Host "✓ Binary found: build\bin\maxx.exe"
+            # Copy to bin directory and rename
+            New-Item -ItemType Directory -Force -Path bin
+            Copy-Item "build\bin\maxx.exe" "bin\CodeSwitch.exe"
+            Get-Item "bin\CodeSwitch.exe" | Format-List Name,Length,LastWriteTime
+          } else {
+            Write-Host "✗ Binary not found!"
+            Write-Host "Listing build/bin directory:"
+            Get-ChildItem build\bin -ErrorAction SilentlyContinue
+            exit 1
+          }
+
+      - name: Generate SHA256 Checksums
+        run: |
+          Push-Location bin
+          Get-FileHash -Algorithm SHA256 CodeSwitch.exe | ForEach-Object { "$($_.Hash.ToLower())  CodeSwitch.exe" } | Out-File -Encoding ascii CodeSwitch.exe.sha256
+          Write-Host "SHA256 checksum generated:"
+          Get-Content CodeSwitch.exe.sha256
+          Pop-Location
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-amd64
+          path: |
+            bin/CodeSwitch.exe
+            bin/CodeSwitch.exe.sha256
+
+  build-linux:
+    name: Build Linux
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install Linux Build Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            pkg-config \
+            libgtk-3-dev \
+            libwebkit2gtk-4.1-dev
+
+      - name: Install Wails
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@latest
+
+      - name: Install frontend dependencies
+        run: cd web && npm install
+
+      - name: Build Linux Binary
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          wails build -platform linux/amd64 -ldflags "-X github.com/Bowl42/maxx-next/internal/version.Version=$VERSION" -clean
+
+      - name: Prepare binary
+        run: |
+          # Wails v2 outputs to build/bin
+          mkdir -p bin
+          if [ -f "build/bin/maxx" ]; then
+            cp build/bin/maxx bin/CodeSwitch
+            chmod +x bin/CodeSwitch
+            echo "Binary prepared: bin/CodeSwitch"
+            ls -lh bin/CodeSwitch
+          else
+            echo "Binary not found!"
+            ls -la build/bin/
+            exit 1
+          fi
+
+      - name: Generate SHA256 Checksum
+        run: |
+          cd bin
+          sha256sum CodeSwitch > CodeSwitch.sha256
+          echo "SHA256 checksum:"
+          cat CodeSwitch.sha256
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-amd64
+          path: |
+            bin/CodeSwitch
+            bin/CodeSwitch.sha256
+
+  create-release:
+    name: Create Release
+    needs: [build-macos, build-windows, build-linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Display structure
+        run: ls -R artifacts
+
+      - name: Prepare release assets
+        run: |
+          mkdir -p release-assets
+
+          # macOS
+          cp artifacts/macos-arm64/codeswitch-macos-arm64.zip release-assets/ 2>/dev/null || echo "macOS arm64 not found"
+          cp artifacts/macos-amd64/codeswitch-macos-amd64.zip release-assets/ 2>/dev/null || echo "macOS amd64 not found"
+
+          # Windows
+          cp artifacts/windows-amd64/CodeSwitch.exe release-assets/
+          cp artifacts/windows-amd64/CodeSwitch.exe.sha256 release-assets/
+
+          # Linux
+          cp artifacts/linux-amd64/CodeSwitch release-assets/CodeSwitch-linux
+          cp artifacts/linux-amd64/CodeSwitch.sha256 release-assets/CodeSwitch-linux.sha256
+
+          ls -lh release-assets/
+      - name: Generate latest.json
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          REPO="${{ github.repository }}"
+          BASE_URL="https://github.com/${REPO}/releases/download/${VERSION}"
+
+          # Read SHA256 checksums from existing .sha256 files
+          WIN_SHA=$(cut -d' ' -f1 release-assets/CodeSwitch.exe.sha256)
+          LINUX_SHA=$(cut -d' ' -f1 release-assets/CodeSwitch-linux.sha256)
+
+          cat > release-assets/latest.json << EOF
+          {
+            "version": "${VERSION}",
+            "release_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "files": {
+              "windows": {
+                "name": "CodeSwitch.exe",
+                "url": "${BASE_URL}/CodeSwitch.exe",
+                "sha256": "${WIN_SHA}"
+              },
+              "darwin-arm64": {
+                "name": "codeswitch-macos-arm64.zip",
+                "url": "${BASE_URL}/codeswitch-macos-arm64.zip"
+              },
+              "darwin-amd64": {
+                "name": "codeswitch-macos-amd64.zip",
+                "url": "${BASE_URL}/codeswitch-macos-amd64.zip"
+              },
+              "linux": {
+                "name": "CodeSwitch-linux",
+                "url": "${BASE_URL}/CodeSwitch-linux",
+                "sha256": "${LINUX_SHA}"
+              }
+            }
+          }
+          EOF
+
+          echo "Generated latest.json:"
+          cat release-assets/latest.json
+
+
+      - name: Generate release body
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "Generating release body for v$VERSION"
+
+          # 提取当前版本的更新内容（从标题到下一个版本标题之前）
+          # 注意：先用 tr 去除 Windows CRLF 换行符，否则 awk 匹配失败
+          tr -d '\r' < RELEASE_NOTES.md | awk "/^# Code Switch v$VERSION/,/^# Code Switch v[0-9]/" | head -n -1 > /tmp/version_notes.md
+
+          # 如果没找到版本说明，使用默认内容
+          if [ ! -s /tmp/version_notes.md ]; then
+            echo "## 更新亮点" > /tmp/version_notes.md
+            echo "- 请查看提交历史了解详细更新" >> /tmp/version_notes.md
+          fi
+
+          # 组合完整的 release body
+          cat /tmp/version_notes.md > /tmp/release_body.md
+
+          cat >> /tmp/release_body.md << 'EOF'
+
+          ---
+
+          ## 下载说明
+
+          | 平台 | 文件 | 说明 |
+          |------|------|------|
+          | **Windows** | `CodeSwitch.exe` | 直接运行 |
+          | **macOS (ARM)** | `codeswitch-macos-arm64.zip` | Apple Silicon |
+          | **macOS (Intel)** | `codeswitch-macos-amd64.zip` | Intel 芯片 |
+          | **Linux** | `CodeSwitch-linux` | 原生二进制 |
+
+          ## 使用说明
+
+          ### Windows
+          ```bash
+          # 直接运行
+          .\CodeSwitch.exe
+          ```
+
+          ### macOS
+          ```bash
+          # 解压后运行
+          unzip codeswitch-macos-*.zip
+          open CodeSwitch.app
+          ```
+
+          ### Linux
+          ```bash
+          # 添加执行权限后运行
+          chmod +x CodeSwitch-linux
+          ./CodeSwitch-linux
+          ```
+
+          ## 文件校验
+          所有平台均提供 SHA256 校验文件（`.sha256`），下载后可验证完整性：
+          ```bash
+          # Linux/macOS
+          sha256sum -c CodeSwitch-linux.sha256
+
+          # Windows PowerShell
+          Get-FileHash CodeSwitch.exe | Format-List
+          ```
+          EOF
+
+          echo "Generated release body:"
+          cat /tmp/release_body.md
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: release-assets/*
+          body_path: /tmp/release_body.md
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
