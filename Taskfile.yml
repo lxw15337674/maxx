@@ -72,3 +72,14 @@ tasks:
     desc: Build Docker image
     cmds:
       - docker build --build-arg VERSION={{.VERSION}} --build-arg COMMIT={{.COMMIT}} --build-arg BUILD_TIME={{.BUILD_TIME}} --build-arg VITE_COMMIT={{.COMMIT}} -t maxx .
+
+  wails:dev:
+    desc: Run Wails desktop app in development mode
+    cmds:
+      - wails dev
+
+  wails:build:
+    desc: Build Wails desktop app
+    cmds:
+      - wails build -clean
+

@@ -1,0 +1,21 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "maxx",
+  "outputfilename": "maxx",
+  "frontend:install": "npm install",
+  "frontend:build": "npm run build",
+  "frontend:dev:watcher": "npm run dev",
+  "frontend:dev:serverUrl": "auto",
+  "frontend:dir": "./web",
+  "author": {
+    "name": "Bowl42",
+    "email": "contact@bowl42.com"
+  },
+  "info": {
+    "companyName": "Bowl42",
+    "productName": "Maxx",
+    "productVersion": "0.1.0",
+    "copyright": "Copyright © 2025",
+    "comments": "Maxx - AI API Gateway & Proxy"
+  }
+}

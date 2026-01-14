@@ -6,6 +6,15 @@
 # Binary
 maxx
 
+# Wails build artifacts
+build/bin/
+build/appimage/
+build/darwin/
+build/windows/
+build/linux/
+frontend/
+wails.build.log
+
 # Go build cache
 .gocache/
 .gomodcache/
