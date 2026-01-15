@@ -1,6 +1,6 @@
 /**
  * Wails Transport 实现
- * 使用 Wails 自动生成的绑定调用 Go 方法
+ * 使用 window.wails.Call() 直接调用 Go 方法，不依赖生成的绑定文件
  */
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -34,15 +34,11 @@ import type {
   ImportResult,
 } from './types';
 
-// 导入 Wails 自动生成的绑定
-// @ts-ignore - Wails 绑定在构建时可能不存在
-import * as DesktopApp from '@/wailsjs/go/desktop/DesktopApp';
-
 // Wails 事件 API 类型
 type WailsEventCallback = (data: unknown) => void;
 type WailsUnsubscribeFn = () => void;
 
-// Wails v2 runtime 类型
+// Wails v2 runtime 类型（用于事件监听）
 declare global {
   interface Window {
     runtime?: {
@@ -62,253 +58,262 @@ export class WailsTransport implements Transport {
     // Wails 模式下配置通常不需要
   }
 
+  /**
+   * 辅助方法：调用 Go DesktopApp 服务方法
+   */
+  private async call<T>(method: string, ...args: unknown[]): Promise<T> {
+    if (!window.wails?.Call) {
+      throw new Error('Wails runtime not available');
+    }
+    return window.wails.Call<T>(`DesktopApp.${method}`, ...args);
+  }
+
   // ===== Provider API =====
 
   async getProviders(): Promise<Provider[]> {
-    return DesktopApp.GetProviders() as Promise<Provider[]>;
+    return this.call<Provider[]>('GetProviders');
   }
 
   async getProvider(id: number): Promise<Provider> {
-    return DesktopApp.GetProvider(id) as Promise<Provider>;
+    return this.call<Provider>('GetProvider', id);
   }
 
   async createProvider(data: CreateProviderData): Promise<Provider> {
-    await DesktopApp.CreateProvider(data as any);
+    await this.call<void>('CreateProvider', data);
     // Wails CreateProvider returns void, need to get the created provider
     const providers = await this.getProviders();
     return providers[providers.length - 1];
   }
 
   async updateProvider(id: number, data: Partial<Provider>): Promise<Provider> {
-    await DesktopApp.UpdateProvider({ ...data, id } as any);
+    await this.call<void>('UpdateProvider', { ...data, id });
     return this.getProvider(id);
   }
 
   async deleteProvider(id: number): Promise<void> {
-    await DesktopApp.DeleteProvider(id);
+    await this.call<void>('DeleteProvider', id);
   }
 
   async exportProviders(): Promise<Provider[]> {
-    return DesktopApp.ExportProviders() as Promise<Provider[]>;
+    return this.call<Provider[]>('ExportProviders');
   }
 
   async importProviders(providers: Provider[]): Promise<ImportResult> {
-    return DesktopApp.ImportProviders(providers as any) as Promise<ImportResult>;
+    return this.call<ImportResult>('ImportProviders', providers);
   }
 
   // ===== Project API =====
 
   async getProjects(): Promise<Project[]> {
-    return DesktopApp.GetProjects() as Promise<Project[]>;
+    return this.call<Project[]>('GetProjects');
   }
 
   async getProject(id: number): Promise<Project> {
-    return DesktopApp.GetProject(id) as Promise<Project>;
+    return this.call<Project>('GetProject', id);
   }
 
   async getProjectBySlug(slug: string): Promise<Project> {
-    return DesktopApp.GetProjectBySlug(slug) as Promise<Project>;
+    return this.call<Project>('GetProjectBySlug', slug);
   }
 
   async createProject(data: CreateProjectData): Promise<Project> {
-    await DesktopApp.CreateProject(data as any);
+    await this.call<void>('CreateProject', data);
     const projects = await this.getProjects();
     return projects[projects.length - 1];
   }
 
   async updateProject(id: number, data: Partial<Project>): Promise<Project> {
-    await DesktopApp.UpdateProject({ ...data, id } as any);
+    await this.call<void>('UpdateProject', { ...data, id });
     return this.getProject(id);
   }
 
   async deleteProject(id: number): Promise<void> {
-    await DesktopApp.DeleteProject(id);
+    await this.call<void>('DeleteProject', id);
   }
 
   // ===== Route API =====
 
   async getRoutes(): Promise<Route[]> {
-    return DesktopApp.GetRoutes() as Promise<Route[]>;
+    return this.call<Route[]>('GetRoutes');
   }
 
   async getRoute(id: number): Promise<Route> {
-    return DesktopApp.GetRoute(id) as Promise<Route>;
+    return this.call<Route>('GetRoute', id);
   }
 
   async createRoute(data: CreateRouteData): Promise<Route> {
-    await DesktopApp.CreateRoute(data as any);
+    await this.call<void>('CreateRoute', data);
     const routes = await this.getRoutes();
     return routes[routes.length - 1];
   }
 
   async updateRoute(id: number, data: Partial<Route>): Promise<Route> {
-    await DesktopApp.UpdateRoute({ ...data, id } as any);
+    await this.call<void>('UpdateRoute', { ...data, id });
     return this.getRoute(id);
   }
 
   async deleteRoute(id: number): Promise<void> {
-    await DesktopApp.DeleteRoute(id);
+    await this.call<void>('DeleteRoute', id);
   }
 
   // ===== Session API =====
 
   async getSessions(): Promise<Session[]> {
-    return DesktopApp.GetSessions() as Promise<Session[]>;
+    return this.call<Session[]>('GetSessions');
   }
 
   async updateSessionProject(
     sessionID: string,
     projectID: number
   ): Promise<{ session: Session; updatedRequests: number }> {
-    const result = await DesktopApp.UpdateSessionProject(sessionID, projectID);
-    return result as { session: Session; updatedRequests: number };
+    return this.call<{ session: Session; updatedRequests: number }>('UpdateSessionProject', sessionID, projectID);
   }
 
   async rejectSession(sessionID: string): Promise<Session> {
-    return DesktopApp.RejectSession(sessionID) as Promise<Session>;
+    return this.call<Session>('RejectSession', sessionID);
   }
 
   // ===== RetryConfig API =====
 
   async getRetryConfigs(): Promise<RetryConfig[]> {
-    return DesktopApp.GetRetryConfigs() as Promise<RetryConfig[]>;
+    return this.call<RetryConfig[]>('GetRetryConfigs');
   }
 
   async getRetryConfig(id: number): Promise<RetryConfig> {
-    return DesktopApp.GetRetryConfig(id) as Promise<RetryConfig>;
+    return this.call<RetryConfig>('GetRetryConfig', id);
   }
 
   async createRetryConfig(data: CreateRetryConfigData): Promise<RetryConfig> {
-    await DesktopApp.CreateRetryConfig(data as any);
+    await this.call<void>('CreateRetryConfig', data);
     const configs = await this.getRetryConfigs();
     return configs[configs.length - 1];
   }
 
   async updateRetryConfig(id: number, data: Partial<RetryConfig>): Promise<RetryConfig> {
-    await DesktopApp.UpdateRetryConfig({ ...data, id } as any);
+    await this.call<void>('UpdateRetryConfig', { ...data, id });
     return this.getRetryConfig(id);
   }
 
   async deleteRetryConfig(id: number): Promise<void> {
-    await DesktopApp.DeleteRetryConfig(id);
+    await this.call<void>('DeleteRetryConfig', id);
   }
 
   // ===== RoutingStrategy API =====
 
   async getRoutingStrategies(): Promise<RoutingStrategy[]> {
-    return DesktopApp.GetRoutingStrategies() as Promise<RoutingStrategy[]>;
+    return this.call<RoutingStrategy[]>('GetRoutingStrategies');
   }
 
   async getRoutingStrategy(id: number): Promise<RoutingStrategy> {
-    return DesktopApp.GetRoutingStrategy(id) as Promise<RoutingStrategy>;
+    return this.call<RoutingStrategy>('GetRoutingStrategy', id);
   }
 
   async createRoutingStrategy(data: CreateRoutingStrategyData): Promise<RoutingStrategy> {
-    await DesktopApp.CreateRoutingStrategy(data as any);
+    await this.call<void>('CreateRoutingStrategy', data);
     const strategies = await this.getRoutingStrategies();
     return strategies[strategies.length - 1];
   }
 
   async updateRoutingStrategy(id: number, data: Partial<RoutingStrategy>): Promise<RoutingStrategy> {
-    await DesktopApp.UpdateRoutingStrategy({ ...data, id } as any);
+    await this.call<void>('UpdateRoutingStrategy', { ...data, id });
     return this.getRoutingStrategy(id);
   }
 
   async deleteRoutingStrategy(id: number): Promise<void> {
-    await DesktopApp.DeleteRoutingStrategy(id);
+    await this.call<void>('DeleteRoutingStrategy', id);
   }
 
   // ===== ProxyRequest API =====
 
   async getProxyRequests(params?: CursorPaginationParams): Promise<CursorPaginationResult<ProxyRequest>> {
-    const result = await DesktopApp.GetProxyRequestsCursor(
+    return this.call<CursorPaginationResult<ProxyRequest>>(
+      'GetProxyRequestsCursor',
       params?.limit ?? 100,
       params?.before ?? 0,
       params?.after ?? 0
     );
-    return result as CursorPaginationResult<ProxyRequest>;
   }
 
   async getProxyRequestsCount(): Promise<number> {
-    return DesktopApp.GetProxyRequestsCount();
+    return this.call<number>('GetProxyRequestsCount');
   }
 
   async getProxyRequest(id: number): Promise<ProxyRequest> {
-    return DesktopApp.GetProxyRequest(id) as Promise<ProxyRequest>;
+    return this.call<ProxyRequest>('GetProxyRequest', id);
   }
 
   async getProxyUpstreamAttempts(proxyRequestId: number): Promise<ProxyUpstreamAttempt[]> {
-    return DesktopApp.GetProxyUpstreamAttempts(proxyRequestId) as Promise<ProxyUpstreamAttempt[]>;
+    return this.call<ProxyUpstreamAttempt[]>('GetProxyUpstreamAttempts', proxyRequestId);
   }
 
   // ===== Proxy Status API =====
 
   async getProxyStatus(): Promise<ProxyStatus> {
-    return DesktopApp.GetProxyStatus() as Promise<ProxyStatus>;
+    return this.call<ProxyStatus>('GetProxyStatus');
   }
 
   // ===== Provider Stats API =====
 
   async getProviderStats(clientType?: string, projectId?: number): Promise<Record<number, ProviderStats>> {
-    return DesktopApp.GetProviderStats(clientType ?? '', projectId ?? 0) as Promise<Record<number, ProviderStats>>;
+    return this.call<Record<number, ProviderStats>>('GetProviderStats', clientType ?? '', projectId ?? 0);
   }
 
   // ===== Settings API =====
 
   async getSettings(): Promise<Record<string, string>> {
-    return DesktopApp.GetSettings();
+    return this.call<Record<string, string>>('GetSettings');
   }
 
   async getSetting(key: string): Promise<{ key: string; value: string }> {
-    const value = await DesktopApp.GetSetting(key);
+    const value = await this.call<string>('GetSetting', key);
     return { key, value };
   }
 
   async updateSetting(key: string, value: string): Promise<{ key: string; value: string }> {
-    await DesktopApp.UpdateSetting(key, value);
+    await this.call<void>('UpdateSetting', key, value);
     return { key, value };
   }
 
   async deleteSetting(key: string): Promise<void> {
-    await DesktopApp.DeleteSetting(key);
+    await this.call<void>('DeleteSetting', key);
   }
 
   // ===== Logs API =====
 
   async getLogs(limit = 100): Promise<{ lines: string[]; count: number }> {
-    return DesktopApp.GetLogs(limit) as Promise<{ lines: string[]; count: number }>;
+    return this.call<{ lines: string[]; count: number }>('GetLogs', limit);
   }
 
   // ===== Antigravity API =====
 
   async validateAntigravityToken(refreshToken: string): Promise<AntigravityTokenValidationResult> {
-    return DesktopApp.ValidateAntigravityToken(refreshToken) as Promise<AntigravityTokenValidationResult>;
+    return this.call<AntigravityTokenValidationResult>('ValidateAntigravityToken', refreshToken);
   }
 
   async validateAntigravityTokens(tokens: string[]): Promise<AntigravityBatchValidationResult> {
-    return DesktopApp.ValidateAntigravityTokens(tokens) as Promise<AntigravityBatchValidationResult>;
+    return this.call<AntigravityBatchValidationResult>('ValidateAntigravityTokens', tokens);
   }
 
   async validateAntigravityTokenText(tokenText: string): Promise<AntigravityBatchValidationResult> {
-    return DesktopApp.ValidateAntigravityTokenText(tokenText) as Promise<AntigravityBatchValidationResult>;
+    return this.call<AntigravityBatchValidationResult>('ValidateAntigravityTokenText', tokenText);
   }
 
   async getAntigravityProviderQuota(providerId: number, forceRefresh?: boolean): Promise<AntigravityQuotaData> {
-    return DesktopApp.GetAntigravityProviderQuota(providerId, forceRefresh ?? false) as Promise<AntigravityQuotaData>;
+    return this.call<AntigravityQuotaData>('GetAntigravityProviderQuota', providerId, forceRefresh ?? false);
   }
 
   async startAntigravityOAuth(): Promise<{ authURL: string; state: string }> {
-    return DesktopApp.StartAntigravityOAuth() as Promise<{ authURL: string; state: string }>;
+    return this.call<{ authURL: string; state: string }>('StartAntigravityOAuth');
   }
 
   // ===== Cooldown API =====
 
   async getCooldowns(): Promise<Cooldown[]> {
-    return DesktopApp.GetCooldowns() as Promise<Cooldown[]>;
+    return this.call<Cooldown[]>('GetCooldowns');
   }
 
   async clearCooldown(providerId: number): Promise<void> {
-    await DesktopApp.ClearCooldown(providerId);
+    await this.call<void>('ClearCooldown', providerId);
   }
 
   // ===== Wails Events 订阅 =====
